@@ -172,7 +172,7 @@ Deliverables:
   bot's own persona and fails with exit 2 on any missing piece.
 - `conf/keys_example.json`, `conf/provider.json` and `conf/persona.json`
   with one local OpenAI-compatible example and OpenRouter. `conf/keys.json`
-  is already ignored by git; confirm it.
+  is ignored by git (added to `.gitignore` in phase 0).
 - `driver.py`: `call(model, messages, tools) -> Reply`, with a `DRIVERS` map
   holding only `openai`. `Reply` carries text, tool calls, token usage.
 - Error classification, the piece recovery depends on:
