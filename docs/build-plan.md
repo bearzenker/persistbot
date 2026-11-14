@@ -1,0 +1,362 @@
+# Persist Bot build plan
+
+Source design: Google Doc "Persistent Bot" (main body, Appendix A agent
+comparison, Appendix B persona pattern). This plan narrows that mid-state
+design to an MVP and orders the rest into phases, one branch and one pull
+request per phase.
+
+How to work this plan is in `CLAUDE.md` at the repo root. The persona,
+provider and keys contract is in `docs/persona-pattern.md`.
+
+## Status
+
+Update this table in the same pull request that finishes a phase.
+
+| Phase | Scope | Branch | Status |
+|---|---|---|---|
+| 0 | This plan | `claude/persistbot-mvp-plan-5bdmdy` | done |
+| 1 | Skeleton: package, config, logging, state store, lock | `phase-1-skeleton` | not started |
+| 2 | Driver: persona resolution, OpenAI client, error classes | `phase-2-driver` | not started |
+| 3 | Tools: allowlisted shell, files, memory, notes | `phase-3-tools` | not started |
+| 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
+| 5 | Phone a friend | `phase-5-friend` | not started |
+| 6 | Planning mode | `phase-6-plan` | not started |
+| 7 | To Do list | `phase-7-todo` | not started |
+| 8 | Reporting, rsyslog, sudo list, custom tools, install | `phase-8-ops` | not started |
+| 9 | Backlog (unscheduled) | n/a | n/a |
+
+Branch names are suggestions. If the session assigns a branch name, use that
+and put the phase number in the pull request title. Each phase branches from
+`main` after the previous phase has merged.
+
+## What the product is
+
+A Python (3.10 or later) agent harness for edge nodes. It is started by a
+timer or by an error-handling script, never by a person, and has no chat
+mode. Each start is one *tick*: take the lock, find work, run a bounded tool
+loop against a small model on the trusted LAN, record what happened, exit.
+
+Two properties define success:
+
+- **Persistence.** A tick never assumes the task finished. An upstream
+  failure (HTTP 429, 5xx, timeout, connection refused), a crash, or a spent
+  turn budget leaves the goal open, and the next tick picks it up with the
+  notes the earlier ticks left behind.
+- **Phone a friend.** When the small model fails a task three times, the
+  harness asks a stronger named persona for guidance. This is the critical
+  success factor. It lands in phase 5, but the MVP builds the attempt
+  counter and the stuck state it depends on.
+
+## Decisions taken for the MVP
+
+These follow the design doc and Appendix A unless marked *open*; open items
+are collected at the end with the default this plan assumes.
+
+| Topic | Decision |
+|---|---|
+| Runtime dependencies | `openai`, `PyYAML`. Everything else is the standard library. No MCP, LiteLLM or agent framework. |
+| State | One SQLite file per bot, `<base>/state.db`, WAL mode, standard `sqlite3` module. Schema versioned with `PRAGMA user_version` and numbered migration functions. |
+| Concurrency | One tick per bot at a time, enforced with `flock` on `<base>/bot.lock`. A second start exits 0 quietly. |
+| Model protocol | OpenAI chat completions with native tool calling, for both the edge model and the friends. |
+| SDK retries | `max_retries=0`, `timeout=300`. The harness owns retry policy: it defers to the next tick. |
+| Tool budget | At most six tool schemas in any one request, each description one or two lines. Later phases swap tools by mode instead of adding to the list. |
+| Prompt budget | System prompt plus tool schemas under about 1,500 tokens. Memory injected into the prompt is capped by character count. |
+| Shell safety | The allowlist is a guardrail against a confused model, not a sandbox. The security boundary is the unprivileged account. |
+| Layout | `src/persistbot/` package, `bot.py` launcher at the repo root so `/opt/persistbot/bot.py ./conf/raven.yaml` works as the design doc shows. |
+
+## Core model: goals and attempts
+
+A **goal** is one unit of work: the prompt from the command line, a prompt
+file, or (later) a plan or a To Do item. An **attempt** is one tick spent on
+a goal.
+
+Goal states:
+
+```
+queued -> active -> done
+                 -> stuck      (failure limit reached; phase 5 escalates from here)
+                 -> abandoned  (operator action or hard error)
+```
+
+Attempt outcomes and whether they count toward the failure limit of three:
+
+| Outcome | Meaning | Counts as a failure |
+|---|---|---|
+| `completed` | The model called `goal_done` | no |
+| `deferred` | Upstream error; nothing wrong with the model's work | no, tracked separately with backoff |
+| `budget` | Turn limit reached without `goal_done` | yes |
+| `invalid` | Malformed tool call, or text with no tool call, repeated past a small limit | yes |
+| `crashed` | Attempt row has a start but no end, found by the next tick | yes |
+
+Rules that carry the persistence requirement:
+
+1. A goal becomes `done` only through an explicit `goal_done(summary)` tool
+   call. Any other way of ending a tick leaves it `active`.
+2. Every tool call is journalled in two writes: a row before execution, an
+   update with the result after. If a tick dies between them, the next
+   attempt is told that the command was started and its outcome is unknown,
+   and that it should inspect before repeating.
+3. A new attempt does not replay the previous transcript. It is given the
+   goal, the work notes, and a short harness-written summary of each earlier
+   attempt (outcome, last few tool calls). This keeps the prompt small for a
+   3B model and matches the "fresh start" reasoning in the design doc.
+4. Three counted failures move the goal to `stuck`, write a report line, and
+   stop work on it. In the MVP a stuck goal waits for an operator. Phase 5
+   replaces the wait with a call to a friend.
+5. After a `deferred` outcome the goal records `not_before`, with backoff
+   doubling from 5 minutes to a 1 hour cap, honouring `Retry-After` when the
+   server sends it. Ticks before that time exit without calling the model.
+
+Work selection order in a tick: active goal, then oldest queued goal, then
+(later phases) active plan step, then To Do.
+
+Exit codes: `0` goal done or nothing to do, `75` (`EX_TEMPFAIL`) deferred on
+an upstream error, `1` attempt failed and the goal remains open, `2`
+configuration or startup error.
+
+## Phase 1: skeleton
+
+No model calls in this phase.
+
+Deliverables:
+
+- `pyproject.toml` (Python 3.10 or later, dependencies above, `pytest` as a
+  development extra), `bot.py` launcher, `src/persistbot/__main__.py`.
+- `config.py`: load `conf/<bot>.yaml`, or `conf/init.yaml` when no path is
+  given. Resolve `venv` (absolute), `base` (directory, defaults to `venv`),
+  `system`, `name`, `persona`, `friends`, `logging`, `reporting`, `skills`,
+  `incoming`. Validate `name` against `[A-Za-z0-9_-]+`. Unknown keys are an
+  error. The sample YAML in the design doc is not valid as written
+  (`reporting` lacks a colon, `logging` mixes list and map); use plain maps:
+
+  ```yaml
+  bot:
+    venv: /opt/persistbot
+    base: raven
+    system: edge_bot
+    name: Raven
+    persona: Bichon
+    friends:
+      Antelope: python
+    logging:   { mode: local, dir: ./raven/logs }
+    reporting: { mode: local, dir: ./raven/logs }
+    skills: [bash]
+    incoming: ./raven/incoming
+    limits: { max_turns: 12, max_failures: 3 }
+  ```
+
+- `log.py`: one function family the rest of the code calls, never
+  `logging.getLogger` inline. Three sinks under the log directory:
+  `action.log` (operations), `chat.log` (append-only transcript of every
+  request, response and tool call), `report.log`. `mode: local` only; the
+  function signature must allow an rsyslog mode later without touching
+  callers.
+- `store.py`: open the database, apply migrations, typed helpers. MVP
+  tables: `goal`, `attempt`, `tool_call`, `note`, `memory`, `meta`.
+- `lock.py`: non-blocking `flock`.
+- CLI: `bot.py [conf] [-f prompt_file] [prompt words...]`, plus
+  `bot.py [conf] status` to print goals and attempts for an operator.
+
+Acceptance: `pytest` passes; a tick with no work creates the database and
+logs, and exits 0; a second concurrent start exits 0 without touching state.
+
+## Phase 2: driver
+
+Read `docs/persona-pattern.md` first. It is the contract.
+
+Deliverables:
+
+- `persona.py`: discover and merge `conf/persona*.json`, load
+  `conf/provider.json` and the keys file, and `resolve(name, persona,
+  character=None, parameters=None) -> ResolvedModel`. Startup resolves the
+  bot's own persona and fails with exit 2 on any missing piece.
+- `conf/keys_example.json`, `conf/provider.json` and `conf/persona.json`
+  with one local OpenAI-compatible example and OpenRouter. `conf/keys.json`
+  is already ignored by git; confirm it.
+- `driver.py`: `call(model, messages, tools) -> Reply`, with a `DRIVERS` map
+  holding only `openai`. `Reply` carries text, tool calls, token usage.
+- Error classification, the piece recovery depends on:
+  - `UpstreamRetryable`: 408, 409, 429, 5xx, timeouts, connection errors.
+    Carries `retry_after` when present.
+  - `UpstreamFatal`: 400, 401, 403, 404 and anything else. Reported, and the
+    goal is not burned for it: the attempt is `deferred` with a long backoff
+    and a report line, because a bad key is an operator problem.
+- `tests/fakellm.py`: a standard-library HTTP server that plays a scripted
+  list of chat completion responses, including status codes, delays and
+  dropped connections. All later phases test against it. No test needs a
+  real model or network.
+
+Acceptance: tests cover unknown persona, missing provider entry, missing key
+entry, parameter override order, character fallback, duplicate persona name,
+and each error class against the fake server.
+
+## Phase 3: tools
+
+Deliverables:
+
+- `tools/` with a small registry: name, one-line description, JSON schema,
+  handler. The MVP set is exactly six:
+
+  | Tool | Purpose |
+  |---|---|
+  | `run_shell(command)` | Run one allowlisted command |
+  | `read_file(path)` | Read a text file, size capped |
+  | `write_file(path, content)` | Write a file under the bot's base directory |
+  | `remember(text)` | Store an operational fact about this node |
+  | `note(text)` | Work note on the current goal, shown to later attempts |
+  | `goal_done(summary)` | Declare the goal complete |
+
+- `allowlist.py`: the unprivileged list from the design doc, matched left
+  anchored as `^<command>(\s|$)`, with the wildcard names (`ls*`, `?zip`,
+  `?unzip`) expanded so the wildcard part matches only `[A-Za-z0-9_-]`. The
+  command is split with `shlex` and run without a shell, with a timeout and
+  an output cap. Any of `; & | $ < >`, a backtick, a newline or another
+  control character rejects the command before matching. `sudo` is rejected
+  until phase 8.
+- Tool errors are returned to the model as tool results, never raised.
+- Memory: `remember` writes to `memory` with a kind column (`memory` now;
+  `gossip` and `personality` later use the same table). Rows are injected
+  into the system prompt newest first up to the character cap.
+- `evals/`: a script that runs about twenty small tasks against the six real
+  schemas and prints the act-when-it-should rate per persona. Appendix A
+  asks for this before trusting any 3B model. It needs the LAN model, so the
+  operator runs it; the phase ships the script and the task file.
+
+Acceptance: allowlist tests include the design doc's own counterexample
+(`ls\nrm\x20/tmp/...`), pipes, substitutions, absolute-path commands and
+each wildcard; file tools refuse paths that escape the base directory for
+writes.
+
+## Phase 4: tick loop (MVP)
+
+Deliverables:
+
+- `tick.py`:
+  1. Take the lock.
+  2. Close any attempt left open by a dead tick as `crashed`.
+  3. Ingest input: command-line prompt, `-f` file, files in `incoming/`.
+     Each becomes a queued goal keyed by a content hash, then the file moves
+     to `incoming/done/`. The hash makes a crash between the insert and the
+     move harmless.
+  4. Select work, honouring `not_before`.
+  5. Build the prompt: `<venv>/system.txt`, `<base>/system.txt`, tool list,
+     the identity line (`Your name for this session is <name>.` plus the
+     persona character), memory, then the goal, notes and attempt summaries
+     as the user message.
+  6. Run the tool loop up to `max_turns`, journalling every call.
+  7. Record the outcome, apply the failure rules above, write the report
+     line, set the exit code.
+- `system.txt` at the repo root: short, uniform instructions. It must tell
+  the model that work continues across runs, to leave notes, and to call
+  `goal_done` only after checking the result.
+- `deploy/persistbot@.service` and `deploy/persistbot@.timer` examples
+  running as an unprivileged user, plus a short `README.md` covering
+  install, config and the status command.
+- Fault-injection tests against the fake server, which are the acceptance
+  test for the MVP:
+  - 429 on the first call: goal stays active, exit 75, `not_before` set,
+    next tick after the backoff completes the goal.
+  - 429 in the middle of a tool loop: completed tool calls are in the
+    journal and summarised to the next attempt.
+  - Process killed mid-tool: next tick records `crashed`, tells the model
+    the outcome is unknown, and continues.
+  - Three `budget` outcomes: goal goes `stuck`, report line written, later
+    ticks do not call the model for it.
+  - Deferred outcomes alone never make a goal `stuck`.
+  - Memory written in one tick appears in the next tick's prompt.
+  - The same incoming file delivered twice produces one goal.
+
+Done when: all of the above pass, and the operator has run one real goal on
+a VM against a LAN model through the systemd timer. Tag `v0.1.0`.
+
+## Phase 5: phone a friend
+
+First after the MVP because it is the critical success factor.
+
+- Resolve every persona in `friends` at startup; a missing friend is exit 2.
+- Deterministic triggers in the harness, since a small model seldom notices
+  it is stuck: the failure limit of three, the same tool and arguments
+  repeated, and `goal_done` contradicted by a check. These call the friend
+  on the model's behalf.
+- `phone_a_friend(persona, question)` tool as the optional model-initiated
+  path. The system prompt lists friends with their topic, as in "for help
+  with python, phone Antelope". It replaces `write_file` or `read_file` in
+  the tool list only if the six-tool cap needs it; decide with eval data.
+- The call sends the friend the goal, notes, attempt summaries and the last
+  errors, with a friend-side system prompt asking for concrete next steps a
+  small model can follow. The reply is stored as a note marked as advice,
+  the failure counter resets once, and the goal returns to `active`.
+- Limits: escalations per goal (default two), then `stuck` for an operator.
+  A friend's upstream error defers the escalation, it does not consume it.
+- `usage` table: tokens per persona per attempt, so cost is visible.
+- Gossip: `memory` rows of kind `gossip` recording what each friend was
+  asked and whether the advice worked.
+
+## Phase 6: planning mode
+
+Two-pass planning from the design doc, each pass its own tick:
+
+1. Review pass: goal, pass criteria and planning notes are written; the
+   tick ends.
+2. Step pass: a fresh tick reads those and writes the steps, marks the plan
+   ready.
+3. One step per tick afterwards. Steps are checked off, never deleted, each
+   with work notes.
+4. When all steps are checked, a verify tick runs the pass criteria. Only
+   that closes the plan. A failed verify reopens it and counts as a failure.
+
+Tables `plan` and `plan_step`. Planning tools (`plan_set`, `step_done`)
+replace the general goal tools during planning ticks to hold the six-tool
+cap. On completion the plan is dumped to a file under the log directory.
+A goal becomes a plan when its prompt file asks for one or a friend's advice
+says to; the trigger rule is settled at the start of the phase.
+
+## Phase 7: To Do
+
+- `todo` table: title, description.
+- `defer_todo(title, description)` tool so the model can park unrelated
+  findings instead of chasing them.
+- A tick with no goal and no plan step takes one To Do item and runs it as a
+  goal. The item is removed when taken; the goal's own record is the audit
+  trail. Optional off-hours window in config.
+
+## Phase 8: operations
+
+- Reporting through the logging function with an rsyslog mode.
+- Sudo allowlist (`sudo wc -l`, `sudo cat`, `sudo grep`, `sudo tail`) with a
+  matching `/etc/sudoers.d/99-bot` template.
+- `<base>/tools/` directory: executables there are approved automatically.
+- Install script, multiple bots per host as separate accounts.
+- Markdown export and import of memory for hand editing.
+
+## Phase 9: backlog
+
+Personality store, skills documents attached to custom tools, sending
+finished plans and repair scripts upstream to share between nodes, chat
+notifications (Mattermost or Slack webhook), pipelines in `run_shell`,
+drivers other than `openai`, a model running on the node itself.
+
+## Open questions
+
+Each has a default that the plan assumes. An answer changes only the phase
+named.
+
+1. **Keyless local provider** (phase 2). Appendix B makes the keys join
+   strict; the design doc says a key may be unnecessary. Default: the
+   provider entry must exist in `keys.json`, and an empty `key` is allowed
+   and sent as a placeholder.
+2. **Where `driver` and `url` live** (phase 2). CandidSail keeps them on the
+   persona; the design doc adds `provider.json`. Default: `provider.json`
+   supplies them and a persona may override either.
+3. **Pipes in `run_shell`** (phase 3). Default: rejected in the MVP, so the
+   model runs one command per call. `grep`, `awk` and `sort` lose some value
+   without pipes; allowing pipelines of allowlisted commands is a contained
+   addition if wanted.
+4. **`write_file` scope** (phase 3). Default: writes only under the bot's
+   base directory; reads anywhere the account can read.
+5. **SQLite versus the design doc's "existing MCP module"** (phase 1).
+   Default: standard `sqlite3`, following Appendix A.
+6. **Failure limit and stuck goals in the MVP** (phase 4). Default: three
+   failures, then the goal waits for an operator until phase 5 exists.
+7. **Model eval** (phase 3). Needs a LAN model the build sessions cannot
+   reach. Default: the script ships and the operator runs it.
