@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Persist Bot secrets and per-bot state
+conf/keys.json
+*.db
+*.db-wal
+*.db-shm
