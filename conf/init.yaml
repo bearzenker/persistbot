@@ -1,0 +1,22 @@
+# Default bot configuration, used when bot.py is started without a config file.
+# Relative paths resolve against `venv`.
+bot:
+  venv: /opt/persistbot     # install directory, always absolute
+  base: raven               # this bot's directory; holds state.db, logs, incoming
+  system: system            # instance system prompt: <base>/system.txt
+  name: Raven               # letters, digits, _ and - only
+  persona: Bichon           # persona this bot runs as (conf/persona*.json)
+  friends:
+    Antelope: python        # persona to phone, and what it is good for
+  logging:
+    mode: local
+    dir: ./raven/logs       # action.log, chat.log
+  reporting:
+    mode: local
+    dir: ./raven/logs       # report.log
+  skills:
+    - bash
+  incoming: ./raven/incoming
+  limits:
+    max_turns: 12           # model turns per tick
+    max_failures: 3         # failed attempts before a goal is stuck

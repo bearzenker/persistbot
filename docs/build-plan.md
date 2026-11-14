@@ -15,7 +15,7 @@ Update this table in the same pull request that finishes a phase.
 | Phase | Scope | Branch | Status |
 |---|---|---|---|
 | 0 | This plan | `claude/persistbot-mvp-plan-5bdmdy` | done |
-| 1 | Skeleton: package, config, logging, state store, lock | `phase-1-skeleton` | not started |
+| 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 2 | Driver: persona resolution, OpenAI client, error classes | `phase-2-driver` | not started |
 | 3 | Tools: allowlisted shell, files, memory, notes | `phase-3-tools` | not started |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
@@ -160,6 +160,23 @@ Deliverables:
 Acceptance: `pytest` passes; a tick with no work creates the database and
 logs, and exits 0; a second concurrent start exits 0 without touching state.
 
+As built:
+
+- A prompt given on the command line or with `-f` is queued as a goal
+  already in this phase, so input is never dropped. Nothing runs a goal
+  until phase 4. Phase 4 adds the `incoming/` directory and the runner.
+- `Store.add_goal` refuses a duplicate only while a goal with the same text
+  is still `queued` or `active`. A recurring timer prompt therefore cannot
+  pile up behind itself, and it is accepted again once the earlier goal has
+  closed.
+- The config file is the first argument when it ends in `.yaml` or `.yml`;
+  otherwise `conf/init.yaml` beside `bot.py` is used.
+- The config accepts `friends` and `logging` either as maps or as the
+  design doc's lists of single-key maps.
+- `log.error` writes to stderr as well as `action.log`, so a calling script
+  or cron mail sees startup failures. `log.out` is the one path to stdout,
+  used by `status`.
+
 ## Phase 2: driver
 
 Read `docs/persona-pattern.md` first. It is the contract.
@@ -235,9 +252,10 @@ Deliverables:
   1. Take the lock.
   2. Close any attempt left open by a dead tick as `crashed`.
   3. Ingest input: command-line prompt, `-f` file, files in `incoming/`.
-     Each becomes a queued goal keyed by a content hash, then the file moves
-     to `incoming/done/`. The hash makes a crash between the insert and the
-     move harmless.
+     Each becomes a queued goal through `Store.add_goal`, then the file
+     moves to `incoming/done/`. `add_goal` returns the existing goal when
+     one with the same text is still open, which makes a crash between the
+     insert and the move harmless.
   4. Select work, honouring `not_before`.
   5. Build the prompt: `<venv>/system.txt`, `<base>/system.txt`, tool list,
      the identity line (`Your name for this session is <name>.` plus the
