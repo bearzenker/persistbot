@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "persistbot"
+version = "0.0.1"
+description = "Timer-driven agent harness for edge nodes with persistent goals and memory"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "openai>=1.40",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+persistbot = "persistbot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
