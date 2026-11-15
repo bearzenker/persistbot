@@ -116,8 +116,11 @@ def schemas() -> list[dict]:
     return [tool.schema() for tool in TOOLS.values()]
 
 
-def call(ctx: Context, name: str, arguments: str) -> Result:
-    """Run the tool call the model wrote. `arguments` is its JSON text, unparsed."""
+def parse(name: str, arguments: str) -> tuple[Tool, dict[str, str]] | Result:
+    """Check a tool call as the model wrote it, without running it.
+
+    Returns the tool and its argument values, or the malformed `Result`.
+    """
     tool = TOOLS.get(name)
     if tool is None:
         return Result(
@@ -138,6 +141,15 @@ def call(ctx: Context, name: str, arguments: str) -> Result:
             problem = "is missing" if arg not in args else "must be text"
             return Result(False, f"error: {name} argument '{arg}' {problem}", malformed=True)
         values[arg] = value
+    return tool, values
+
+
+def call(ctx: Context, name: str, arguments: str) -> Result:
+    """Run the tool call the model wrote. `arguments` is its JSON text, unparsed."""
+    parsed = parse(name, arguments)
+    if isinstance(parsed, Result):
+        return parsed
+    tool, values = parsed
     try:
         return tool.handler(ctx, **values)
     except Exception as exc:  # a tool must never end the tick
