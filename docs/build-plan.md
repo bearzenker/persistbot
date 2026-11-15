@@ -45,10 +45,11 @@ end without warning, so it must be true at every pushed commit.
 - **State:** phases 0, 1 and 2 are merged. Phase 3 (tools) is in progress
   on `claude/youthful-pasteur-jy7xzm`.
 - **Finished in phase 3:** `scripts/cloud-conf.sh` and the "Cloud build
-  sessions" section of `CLAUDE.md`. A live tool call as persona `Raven`
-  through OpenRouter worked from a cloud session.
-- **Next:** `src/persistbot/tools/` (registry and the six tools),
-  `allowlist.py`, their tests, then `evals/`.
+  sessions" section of `CLAUDE.md`; `allowlist.py`; `tools/` (registry,
+  `schemas()`, `call()` and the six tools); `memory.py`; tests for all of
+  it. A live tool call as persona `Raven` through OpenRouter worked.
+- **Next:** `evals/` (script and task file, with a test against the fake
+  server), then the phase 3 "As built" notes, then set the row to `done`.
 - **Waiting on the owner:** nothing. Open questions use their defaults.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
