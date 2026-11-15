@@ -22,6 +22,10 @@ FILE_CAP = 1_000_000  # bytes one command may write through `> file`
 ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "TZ")
 
 
+def _pipe() -> tuple[int, int]:
+    return os.pipe()
+
+
 def _kill(procs: list[subprocess.Popen]) -> None:
     for proc in procs:
         try:
@@ -65,12 +69,12 @@ def run_shell(ctx: Context, command: str) -> Result:
 
     # One pipe carries everything the model is shown: the last command's
     # output and every command's errors, in the order they are written.
-    shown_read, shown_write = os.pipe()
+    shown_read, shown_write = _pipe()
     # Output for `> file` passes through the harness, so it can be bounded:
     # written straight to the file, `cat /dev/zero > x` would fill the disk.
     copy_read = copy_write = None
     if target is not None and pipeline.stdout != "/dev/null":
-        copy_read, copy_write = os.pipe()
+        copy_read, copy_write = _pipe()
     procs: list[subprocess.Popen] = []
     names = " | ".join(item.argv[0] for item in pipeline.commands)
     feed = subprocess.DEVNULL  # stdin of the next command
@@ -83,7 +87,7 @@ def run_shell(ctx: Context, command: str) -> Result:
                 next_feed = None
             else:
                 try:
-                    next_feed, out = os.pipe()
+                    next_feed, out = _pipe()
                 except OSError as exc:  # out of descriptors: stop what has started
                     failure = f"error: cannot start the pipeline: {exc.strerror or exc}"
                     if feed != subprocess.DEVNULL:

@@ -213,7 +213,7 @@ def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx):
 
 def test_run_shell_pipeline_that_cannot_be_set_up_leaves_nothing_running(ctx, monkeypatch):
     started = []
-    real_popen, real_pipe = shell.subprocess.Popen, os.pipe
+    real_popen, real_pipe = shell.subprocess.Popen, shell._pipe
     calls = {"pipe": 0}
 
     def popen(*args, **kwargs):
@@ -228,7 +228,7 @@ def test_run_shell_pipeline_that_cannot_be_set_up_leaves_nothing_running(ctx, mo
         return real_pipe()
 
     monkeypatch.setattr(shell.subprocess, "Popen", popen)
-    monkeypatch.setattr(shell.os, "pipe", pipe)
+    monkeypatch.setattr(shell, "_pipe", pipe)
     result = run(ctx, "run_shell", command="tail -f /dev/null | cat | cat")
     assert not result.ok and "cannot start the pipeline" in result.text
     assert len(started) == 1 and started[0].returncode is not None  # killed and reaped
