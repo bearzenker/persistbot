@@ -180,6 +180,8 @@ def test_stdout_redirect_on_the_last_command():
     assert pipeline.commands[0].argv == ["ls"] and pipeline.commands[0].stderr == "stdout"
     assert parse("ls 1>/dev/null").stdout == "/dev/null"
     assert parse("ls a2>out").commands[0].argv == ["ls", "a2"]  # only a bare 2 is a stream
+    assert parse("ls '3'>out").commands[0].argv == ["ls", "3"]   # a quoted number is a word
+    assert parse("ls 3 >out").commands[0].argv == ["ls", "3"]
 
 
 def test_redirections_apply_left_to_right():
@@ -202,6 +204,9 @@ def test_redirections_apply_left_to_right():
         "ls >&2",
         "ls 2>&1x",
         "ls &> out",
+        "cat 3>report.txt",      # a stream other than 1 or 2
+        "cat 0> x",
+        "cat 10>x",
         "cat < /etc/passwd",
         "cat << EOF",
     ],

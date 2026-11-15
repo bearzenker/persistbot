@@ -136,7 +136,9 @@ def _tokens(text: str) -> list[tuple]:
             i += 1
         elif ch == ">":
             fd = 1
-            if not quoted and "".join(word) in ("1", "2"):
+            if word and not quoted and "".join(word).isdigit():
+                if "".join(word) not in ("1", "2"):
+                    raise Rejected("only output (>) and errors (2>) can be redirected")
                 fd = int(word[0])
                 word.clear()
             flush()
