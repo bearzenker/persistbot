@@ -75,6 +75,37 @@ A session can end without warning, so unpushed work is lost work.
 - The harness runs as an unprivileged user. Nothing may require root before
   phase 8, and then only through the sudo allowlist.
 
+## Cloud build sessions
+
+The owner's cloud environment ("PersistBot") carries three variables, each
+the JSON text of one live config file: `KEY` (keys), `PROVIDER` (provider)
+and `PERSONA` (persona, currently `Raven` on OpenRouter). Its network
+allows `openrouter.ai`. At the start of a session, when they are set:
+
+```bash
+scripts/cloud-conf.sh
+```
+
+```bash
+python bot.py conf/cloud.yaml status
+```
+
+- The script writes `conf/keys.json`, `conf/provider.json`,
+  `conf/persona_oprtr.json` and `conf/cloud.yaml`. The last is
+  `conf/init.yaml` with `venv` set to the checkout and `persona` set to the
+  one in `PERSONA`. All four are untracked. Use `conf/cloud.yaml` for live
+  runs; do not edit `conf/init.yaml` for this, because the tests resolve
+  the shipped file against `conf/examples/`.
+- The key is disposable and pre-paid. Never print it, log it, commit it or
+  put it in a pull request, and never copy it out of this environment. A
+  401, 402 or 403 from OpenRouter means it has expired or run out: tell the
+  owner, who will supply a new one, and carry on with the fake server.
+- Live calls are for checking that a phase works against a real model, and
+  cost the owner money: keep them few and small. They are never part of
+  `python -m pytest`.
+- If the variables are absent, skip all of this. Every phase can be built
+  and tested without them.
+
 ## Commands
 
 ```bash

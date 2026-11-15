@@ -24,7 +24,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 | 0 | This plan | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
-| 3 | Tools: allowlisted shell, files, memory, notes | `phase-3-tools` | not started |
+| 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | done |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
@@ -42,15 +42,22 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0, 1 and 2 are merged. No phase is in progress.
-- **Next:** phase 3 (tools). Read "Core model" and the phase 2 "As built"
-  notes first; tests that need a model use the `fakellm` fixture.
-- **Waiting on the owner:** nothing. Open questions use their defaults.
+- **State:** phases 0 to 3 are done. Phase 3 is finished on
+  `claude/youthful-pasteur-jy7xzm` and waits for the owner to merge its
+  pull request. No phase is in progress.
+- **Next:** phase 4 (tick loop, the MVP), once phase 3 is on `main`. Read
+  "Core model" and the phase 2 and 3 "As built" notes first. The loop calls
+  `tools.schemas()` and `tools.call(ctx, name, arguments)`; tests that need
+  a model use the `fakellm` fixture.
+- **Waiting on the owner:** merge of phase 3. Open question 3 (pipes) has
+  new evidence under phase 3 "As built"; the default stands until answered.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
 - **Environment:** run tests with `python -m pytest`. A bare `pytest` on the
-  path can be a separate tool install that cannot import `yaml`.
+  path can be a separate tool install that cannot import `yaml`. In the
+  owner's cloud environment, run `scripts/cloud-conf.sh` first for a live
+  persona; see "Cloud build sessions" in `CLAUDE.md`.
 
 ## What the product is
 
@@ -357,6 +364,73 @@ Acceptance: allowlist tests include the design doc's own counterexample
 each wildcard; file tools refuse paths that escape the base directory for
 writes.
 
+As built:
+
+- `tools.schemas()` is the request's tool list. `tools.call(ctx, name,
+  arguments)` takes the argument text as the model wrote it and always
+  returns a `Result(ok, text, done, malformed)`; it never raises.
+  `malformed` marks an unknown tool, bad JSON or a missing argument, which
+  phase 4 counts toward `invalid`. `tools.parse` does the same check
+  without running anything.
+- `goal_done` does not touch the store. It returns `done=<summary>`, and
+  the tick closes the goal. An empty summary is a tool error and the goal
+  stays open.
+- `Context` carries the store, the base directory, the goal and attempt
+  ids, and the shell timeout (60 seconds by default).
+- `run_shell` runs in the base directory with stdout and stderr merged.
+  The model is told `exit code N` and the output. Past 4,000 bytes of
+  output the command is killed and the result says it was cut off. A
+  non-zero exit is `ok=False` but is not malformed.
+- The command gets a reduced environment (`PATH`, `HOME`, `USER`,
+  `LOGNAME`, `LANG`, `TMPDIR`, `TZ`, and `LC_ALL=C`), so a key or proxy
+  setting in the harness's environment does not reach command output.
+- The forbidden characters are rejected anywhere in the command, quoted or
+  not. `grep 'a|b'` and `awk '{print $1}'` are therefore refused, which
+  leaves `awk` of little use. No shell also means no glob or `~`
+  expansion: `ls *.log` looks for a file with that literal name.
+- `umask` behaves as the plan predicted, by system: where there is no
+  such executable the model gets "command not found"; Fedora ships
+  `/usr/bin/umask`, which exits 0 and changes nothing.
+- `ls*` allows any command whose name starts with `ls` (`lsblk`, `lscpu`,
+  `lsof`); `?zip` and `?unzip` allow one leading character (`gzip`,
+  `gunzip`).
+- `read_file` returns at most 8,000 characters and refuses directories,
+  devices and files containing a NUL byte. A relative path is under the
+  base directory.
+- `write_file` resolves symbolic links before the base-directory check,
+  accepts at most 100,000 characters, creates parent directories, and
+  refuses `state.db`, its WAL files and `bot.lock`. It writes a temporary
+  file and renames it into place, so writing through a hard link (`ln
+  state.db alias`) replaces that name only and cannot change the linked
+  file. A replaced file keeps its mode. `rm`, `mv` and `cp` through
+  `run_shell` can still damage the bot's own state; that is the guardrail's
+  limit.
+- `read_file` and `cat` can read `conf/keys.json`, because reads go
+  anywhere the account can (open question 4) and the bot's account owns
+  that file. The content would then be sent to the model provider. Not
+  changed here; a deny rule for the keys file is a small addition if the
+  owner wants it.
+- `remember` collapses whitespace, caps a fact at 300 characters and skips
+  an exact duplicate. `note` caps a note at 1,000 characters.
+- `memory.prompt_block(db)` is the text for the system prompt: kind
+  `memory` only, newest first, 1,500 characters by default including the
+  heading and bullets.
+- The six schemas are about 1,800 characters of JSON, roughly 450 tokens.
+- `evals/run.py [conf.yaml] [-p PERSONA ...] [-v] [--delay S]` sends each
+  task in `evals/tasks.json` (21 tasks) as one request and scores the first
+  tool call as `acted`, `silent`, `wrong` or `invalid`. No tool is
+  executed. It carries a stand-in system prompt until phase 4 ships
+  `system.txt`; switch it to that file then.
+- One live run, 2026-11-15, persona `Raven` (`cohere/north-mini-code:free`
+  on OpenRouter): acted on 18 of 21, never silent, no invalid calls. That
+  model is not one of the 3B candidates; the comparison Appendix A asks
+  for is still the operator's to run on the LAN.
+- Evidence for open question 3: in that run the model reached for pipes
+  and redirection unprompted (`ps aux | grep nginx`, `ps aux --sort=-%mem
+  | head`, `find ... 2>/dev/null`) and for commands off the list (`df`,
+  `netstat`). After a rejection it recovered with a plain command. Each
+  such rejection costs one of the twelve turns.
+
 ## Phase 4: tick loop (MVP)
 
 Deliverables:
@@ -526,3 +600,9 @@ Answers the owner has given. They are settled; do not ask again.
   are written into this plan instead.
 - Live persona, provider and keys files are not added to the repo. It
   carries examples only (phase 2).
+
+- **Cloud build sessions** (2026-11-15). The owner's cloud environment
+  supplies live config as the variables `KEY`, `PROVIDER` and `PERSONA`,
+  with persona `Raven` (`cohere/north-mini-code:free` on OpenRouter) and a
+  disposable pre-paid key. Sessions use them for live checks through
+  `scripts/cloud-conf.sh`. The key must not leave that environment.
