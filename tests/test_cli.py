@@ -150,6 +150,11 @@ def test_unknown_persona_and_unknown_driver_exit_2(make_conf, tmp_path, capsys):
     write_conf_dir(tmp_path, providers={"bichon": {"driver": "telepathy"}})
     assert main([str(conf)]) == EXIT_CONFIG
     assert "unknown driver 'telepathy'" in capsys.readouterr().err
+    write_conf_dir(tmp_path, personas={"Bichon": {"model": "m", "provider": "bichon", "character": 5}})
+    assert main([str(conf)]) == EXIT_CONFIG  # a message and exit 2, not a traceback
+    assert "character: expected text" in capsys.readouterr().err
+    assert main([str(conf), "status"]) == EXIT_OK
+    assert "persona does not resolve" in capsys.readouterr().out
 
 
 def test_status_reports_the_resolved_model_or_why_not(make_conf, tmp_path, capsys):

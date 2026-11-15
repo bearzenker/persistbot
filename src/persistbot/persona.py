@@ -138,6 +138,9 @@ def _check_persona(where: str, raw: Any) -> dict[str, Any]:
     for key in ("model", "provider", "driver", "url"):
         if definition.get(key) is not None:
             definition[key] = _string(f"{where}.{key}", definition[key])
+    for key in ("character", "vendor"):
+        if definition.get(key) is not None and not isinstance(definition[key], str):
+            raise ConfigurationError(f"{where}.{key}: expected text")
     definition["provider"] = definition["provider"].lower()
     definition["parameters"] = check_parameters(f"{where}.parameters", raw.get("parameters"))
     return definition
@@ -210,6 +213,8 @@ class Registry:
         merged = dict(entry["parameters"])
         merged.update(definition["parameters"])
         caller = check_parameters(f"{where}: caller parameters", parameters)
+        if character is not None and not isinstance(character, str):
+            raise ConfigurationError(f"{where}: caller character: expected text")
         merged.update({k: v for k, v in caller.items() if v is not None})
         return ResolvedModel(
             name=name,

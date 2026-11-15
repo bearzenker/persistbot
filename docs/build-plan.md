@@ -42,13 +42,10 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 and 1 are merged. Phase 2 is finished on
-  `claude/awesome-maxwell-8j67y6` and its pull request is waiting for the
-  owner to merge it.
-- **Next:** phase 3 (tools), once phase 2 is on `main`. Read "Core model"
-  and the phase 2 "As built" notes first; tests that need a model use the
-  `fakellm` fixture.
-- **Waiting on the owner:** merge the phase 2 pull request.
+- **State:** phases 0, 1 and 2 are merged. No phase is in progress.
+- **Next:** phase 3 (tools). Read "Core model" and the phase 2 "As built"
+  notes first; tests that need a model use the `fakellm` fixture.
+- **Waiting on the owner:** nothing. Open questions use their defaults.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
@@ -289,6 +286,8 @@ As built:
   (`"0.9"`). Other strings pass, because some parameters are words
   (`reasoning_effort`). The contract said every string was an error; it is
   corrected.
+- `character` and `vendor` must be text. Anything else in a persona file,
+  or a non-text `character` from the caller, is a `ConfigurationError`.
 - A 200 reply that is not a readable chat completion (an HTML page from a
   proxy, an empty `choices`) is `UpstreamFatal`.
 - `Reply.message()` gives the assistant message to append to the

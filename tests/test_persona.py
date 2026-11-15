@@ -169,6 +169,9 @@ def test_files_merge_with_persona_json_first_and_wrapped_form(conf_dir):
         ({"model": "m", "provider": "x", "parameters": {"timeout": 0}}, "positive number"),
         ({"model": "m", "provider": "x", "parameters": [1]}, "expected a map"),
         ("just text", "expected a map"),
+        ({"model": "m", "provider": "x", "character": 5}, "character: expected text"),
+        ({"model": "m", "provider": "x", "character": ["Be brief."]}, "character: expected text"),
+        ({"model": "m", "provider": "x", "vendor": 7}, "vendor: expected text"),
     ],
 )
 def test_bad_persona_definitions(tmp_path, definition, message):
@@ -192,6 +195,11 @@ def test_caller_parameters_are_validated_too(conf_dir):
         registry.resolve("A", "Bichon", parameters={"url": "http://elsewhere"})
     with pytest.raises(ConfigurationError, match="without quotes"):
         registry.resolve("A", "Bichon", parameters={"temperature": "0.9"})
+
+
+def test_caller_character_must_be_text(conf_dir):
+    with pytest.raises(ConfigurationError, match="caller character: expected text"):
+        persona.load(conf_dir).resolve("A", "Bichon", character=5)
 
 
 def test_agent_name_is_validated(conf_dir):
