@@ -7,6 +7,8 @@ from persistbot import EXIT_CONFIG, EXIT_OK, store
 from persistbot.cli import main
 from persistbot.lock import TickLock
 
+from conftest import write_conf_dir
+
 REPO = Path(__file__).parent.parent
 
 
@@ -100,6 +102,7 @@ def test_default_config_is_home_conf_init_yaml(make_conf, tmp_path):
     home = tmp_path / "home"
     (home / "conf").mkdir(parents=True)
     (home / "conf" / "init.yaml").write_text(make_conf().read_text())
+    write_conf_dir(home / "conf")
     assert main(["tidy", "up"], home=home) == EXIT_OK
     with store.Store(base(tmp_path) / "state.db") as db:
         assert db.goals()[0]["prompt"] == "tidy up"
@@ -113,3 +116,46 @@ def test_launcher_script_runs(make_conf, tmp_path):
     )
     assert done.returncode == 0, done.stderr
     assert (base(tmp_path) / "state.db").exists()
+
+
+def test_persona_is_resolved_at_startup(make_conf, tmp_path):
+    assert main([str(make_conf())]) == EXIT_OK
+    text = (base(tmp_path) / "logs" / "action.log").read_text()
+    assert "persona Bichon: model edge-3b via openai at http://127.0.0.1:9/v1" in text
+
+
+def test_unresolvable_persona_exits_2_but_still_queues_the_prompt(make_conf, tmp_path, capsys):
+    conf = make_conf()
+    (tmp_path / "keys.json").unlink()
+    assert main([str(conf), "check", "the", "disk"]) == EXIT_CONFIG
+    err = capsys.readouterr().err
+    assert "keys.json" in err and str(tmp_path / "examples" / "keys.json") in err
+    with store.Store(base(tmp_path) / "state.db") as db:
+        assert [g["prompt"] for g in db.goals()] == ["check the disk"]
+    lock = TickLock(base(tmp_path) / "bot.lock")
+    assert lock.acquire()  # the failed start released it
+    lock.release()
+
+    write_conf_dir(tmp_path)  # the operator fixes it; the goal is still there
+    assert main([str(conf)]) == EXIT_OK
+    with store.Store(base(tmp_path) / "state.db") as db:
+        assert len(db.goals()) == 1
+
+
+def test_unknown_persona_and_unknown_driver_exit_2(make_conf, tmp_path, capsys):
+    conf = make_conf()
+    write_conf_dir(tmp_path, personas={"Heron": {"model": "m", "provider": "bichon"}})
+    assert main([str(conf)]) == EXIT_CONFIG
+    assert "persona 'Bichon' is not defined" in capsys.readouterr().err
+    write_conf_dir(tmp_path, providers={"bichon": {"driver": "telepathy"}})
+    assert main([str(conf)]) == EXIT_CONFIG
+    assert "unknown driver 'telepathy'" in capsys.readouterr().err
+
+
+def test_status_reports_the_resolved_model_or_why_not(make_conf, tmp_path, capsys):
+    conf = make_conf()
+    assert main([str(conf), "status"]) == EXIT_OK
+    assert "model edge-3b  driver openai  url http://127.0.0.1:9/v1" in capsys.readouterr().out
+    (tmp_path / "provider.json").unlink()
+    assert main([str(conf), "status"]) == EXIT_OK  # status still works for the operator
+    assert "persona does not resolve" in capsys.readouterr().out

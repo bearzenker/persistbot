@@ -114,7 +114,7 @@ written. These are the decisions:
 | Empty `provider` skips the key check and fails on first call | `provider` is required |
 | Duplicate persona name warns, later file wins | Error naming both files |
 | Agent names are unvalidated | Must match `[A-Za-z0-9_-]+` |
-| Parameter values are strings cast per driver | Native JSON numbers; a string is a `ConfigurationError` |
+| Parameter values are strings cast per driver | Native JSON values. A number written as a string (`"0.9"`) is a `ConfigurationError`; other strings pass |
 | Keyless self-hosted provider still needs a dummy key | Entry must exist; an empty `key` is accepted and a placeholder is sent |
 | Persona files are committed; `keys_example.json` is the only template | No live persona, provider or keys file is committed; examples for all three are in `conf/examples/` |
 | Six drivers | `openai` only |

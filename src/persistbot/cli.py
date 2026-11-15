@@ -9,7 +9,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from persistbot import EXIT_CONFIG, EXIT_OK, __version__, log, store
+from persistbot import EXIT_CONFIG, EXIT_OK, __version__, log, persona, store
 from persistbot.config import BotConfig, ConfigError, load
 from persistbot.lock import TickLock
 
@@ -53,8 +53,18 @@ def _when(stamp: float | None) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stamp))
 
 
+def _resolve(config: BotConfig) -> persona.ResolvedModel:
+    """The bot's own persona, from the conf directory its config file is in."""
+    return persona.load(config.path.parent).resolve(config.name, config.persona)
+
+
 def status(config: BotConfig) -> int:
     log.out(f"bot {config.name}  persona {config.persona}  state {config.db_path}")
+    try:
+        model = _resolve(config)
+        log.out(f"model {model.model}  driver {model.driver}  url {model.url or '(default)'}")
+    except persona.PersonaError as exc:
+        log.out(f"persona does not resolve: {exc}")
     if not config.db_path.exists():
         log.out("no state yet: this bot has not run")
         return EXIT_OK
@@ -137,6 +147,17 @@ def main(argv: list[str] | None = None, home: Path | None = None) -> int:
             prompts.append(_read_prompt_file(config, args.file))
         if words:
             prompts.append((" ".join(words), "cli"))
+        try:
+            model = _resolve(config)
+        except persona.PersonaError as exc:
+            # Queue the input before giving up, so a prompt is never dropped.
+            tick(config, prompts)
+            log.error(str(exc))
+            return EXIT_CONFIG
+        log.action(
+            f"persona {config.persona}: model {model.model} via {model.driver} "
+            f"at {model.url or 'the driver default'}"
+        )
         return tick(config, prompts)
     except ConfigError as exc:
         log.error(str(exc))

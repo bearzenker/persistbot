@@ -23,7 +23,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 |---|---|---|---|
 | 0 | This plan | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
-| 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | in progress |
+| 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
 | 3 | Tools: allowlisted shell, files, memory, notes | `phase-3-tools` | not started |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
 | 5 | Phone a friend | `phase-5-friend` | not started |
@@ -42,12 +42,13 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 and 1 are merged. Phase 2 is in progress on
-  `claude/awesome-maxwell-8j67y6`. Nothing of it is built yet.
-- **Next:** phase 2 in this order: `persona.py` with its tests,
-  `conf/examples/`, `tests/fakellm.py`, `driver.py` with its tests, then
-  persona resolution at startup in `cli.py`.
-- **Waiting on the owner:** nothing. Open questions use their defaults.
+- **State:** phases 0 and 1 are merged. Phase 2 is finished on
+  `claude/awesome-maxwell-8j67y6` and its pull request is waiting for the
+  owner to merge it.
+- **Next:** phase 3 (tools), once phase 2 is on `main`. Read "Core model"
+  and the phase 2 "As built" notes first; tests that need a model use the
+  `fakellm` fixture.
+- **Waiting on the owner:** merge the phase 2 pull request.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
@@ -272,6 +273,37 @@ Acceptance: tests cover unknown persona, missing provider entry, missing key
 entry, parameter override order, character fallback, duplicate persona name,
 and each error class against the fake server.
 
+As built:
+
+- The conf directory is the directory the bot's YAML file is in. The
+  persona, provider and keys files are read from there.
+- `persona.load(conf_dir)` returns a `Registry`; `resolve` is its method.
+  Phase 5 resolves each friend with the same registry. Friends are not
+  resolved at startup yet.
+- A persona that does not resolve ends the start with exit 2, but only
+  after the prompt has been queued, so input is not dropped. `status`
+  still runs and prints why the persona does not resolve.
+- Parameters travel in the request body as written, so names the OpenAI
+  SDK does not know (`top_k` on llama.cpp) still reach the server.
+- A parameter is rejected when it is a number written as a string
+  (`"0.9"`). Other strings pass, because some parameters are words
+  (`reasoning_effort`). The contract said every string was an error; it is
+  corrected.
+- A 200 reply that is not a readable chat completion (an HTML page from a
+  proxy, an empty `choices`) is `UpstreamFatal`.
+- `Reply.message()` gives the assistant message to append to the
+  conversation. `ToolCall.arguments` is the text the model wrote, unparsed;
+  phase 4 parses it and treats bad JSON as `invalid`.
+- The driver writes one action-log line per call (persona, outcome, tokens,
+  duration). It does not write the transcript; that is the tick's job in
+  phase 4.
+- `tests/fakellm.py`: steps are built with `text`, `tool_call`,
+  `tool_calls`, `error`, `drop`, `slow` and `raw`, queued with `add`, and
+  played one per request. `requests` records what was sent; `unscripted`
+  counts requests that arrived after the script ran out. The `fakellm`
+  fixture starts one, and `write_conf_dir(dir, url=fakellm.url)` in
+  `tests/conftest.py` writes persona files that point at it.
+
 ## Phase 3: tools
 
 Deliverables:
@@ -343,7 +375,9 @@ Deliverables:
      the identity line (`Your name for this session is <name>.` plus the
      persona character), memory, then the goal, notes and attempt summaries
      as the user message.
-  6. Run the tool loop up to `max_turns`, journalling every call.
+  6. Run the tool loop up to `max_turns`, journalling every call. The tick
+     writes each new message and tool result to `chat.log`; the driver
+     does not.
   7. Record the outcome, apply the failure rules above, write the report
      line, set the exit code.
 - `system.txt` at the repo root: short, uniform instructions. It must tell

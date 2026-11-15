@@ -1,0 +1,7 @@
+{
+  "bichon":     { "key": "" },
+  "openrouter": { "key": "" },
+  "openai":     { "key": "" },
+  "xai":        { "key": "" },
+  "aws":        { "key": "" }
+}
