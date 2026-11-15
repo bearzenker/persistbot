@@ -24,7 +24,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 | 0 | This plan | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
-| 3 | Tools: allowlisted shell, files, memory, notes | `phase-3-tools` | not started |
+| 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | in progress |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
@@ -42,15 +42,21 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0, 1 and 2 are merged. No phase is in progress.
-- **Next:** phase 3 (tools). Read "Core model" and the phase 2 "As built"
-  notes first; tests that need a model use the `fakellm` fixture.
+- **State:** phases 0, 1 and 2 are merged. Phase 3 (tools) is in progress
+  on `claude/youthful-pasteur-jy7xzm`.
+- **Finished in phase 3:** `scripts/cloud-conf.sh` and the "Cloud build
+  sessions" section of `CLAUDE.md`. A live tool call as persona `Raven`
+  through OpenRouter worked from a cloud session.
+- **Next:** `src/persistbot/tools/` (registry and the six tools),
+  `allowlist.py`, their tests, then `evals/`.
 - **Waiting on the owner:** nothing. Open questions use their defaults.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
 - **Environment:** run tests with `python -m pytest`. A bare `pytest` on the
-  path can be a separate tool install that cannot import `yaml`.
+  path can be a separate tool install that cannot import `yaml`. In the
+  owner's cloud environment, run `scripts/cloud-conf.sh` first for a live
+  persona; see "Cloud build sessions" in `CLAUDE.md`.
 
 ## What the product is
 
@@ -526,3 +532,9 @@ Answers the owner has given. They are settled; do not ask again.
   are written into this plan instead.
 - Live persona, provider and keys files are not added to the repo. It
   carries examples only (phase 2).
+
+- **Cloud build sessions** (2026-11-15). The owner's cloud environment
+  supplies live config as the variables `KEY`, `PROVIDER` and `PERSONA`,
+  with persona `Raven` (`cohere/north-mini-code:free` on OpenRouter) and a
+  disposable pre-paid key. Sessions use them for live checks through
+  `scripts/cloud-conf.sh`. The key must not leave that environment.
