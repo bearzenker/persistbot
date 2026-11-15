@@ -8,9 +8,16 @@ request per phase.
 How to work this plan is in `CLAUDE.md` at the repo root. The persona,
 provider and keys contract is in `docs/persona-pattern.md`.
 
+The Google Doc is not needed to build any phase. Every detail the phases
+depend on is in this file or in `docs/persona-pattern.md`; the owner chose
+that over committing a copy of the doc. If a session finds it needs
+something that is only in the doc, ask the owner and write the answer here.
+
 ## Status
 
-Update this table in the same pull request that finishes a phase.
+Update this table in the same pull request that finishes a phase. Status is
+`not started`, `in progress` or `done`. A phase is finished for the purpose
+of starting the next one only when its row says `done` on `origin/main`.
 
 | Phase | Scope | Branch | Status |
 |---|---|---|---|
@@ -29,12 +36,31 @@ Branch names are suggestions. If the session assigns a branch name, use that
 and put the phase number in the pull request title. Each phase branches from
 `main` after the previous phase has merged.
 
+## Handoff
+
+This section is what a new session reads to continue. Rewrite it, do not
+append to it, in every push that changes the state of the work. Sessions can
+end without warning, so it must be true at every pushed commit.
+
+- **State:** phases 0 and 1 are merged. No phase is in progress.
+- **Next:** phase 2 (driver). Read `docs/persona-pattern.md` first.
+- **Waiting on the owner:** nothing. Open questions use their defaults.
+- **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
+  commit, `a77e334`, that deletes the phase 1 package. The owner decided to
+  keep phase 1. Never merge or build on that branch.
+- **Environment:** run tests with `python -m pytest`. A bare `pytest` on the
+  path can be a separate tool install that cannot import `yaml`.
+
 ## What the product is
 
 A Python (3.10 or later) agent harness for edge nodes. It is started by a
 timer or by an error-handling script, never by a person, and has no chat
 mode. Each start is one *tick*: take the lock, find work, run a bounded tool
 loop against a small model on the trusted LAN, record what happened, exit.
+
+The job it is built for: a small, cheap model on an edge node looks at a
+failure, learns facts about its node, and writes small repair scripts. It
+must stay light enough for micro VMs and single-board computers.
 
 Two properties define success:
 
@@ -63,6 +89,7 @@ are collected at the end with the default this plan assumes.
 | Prompt budget | System prompt plus tool schemas under about 1,500 tokens. Memory injected into the prompt is capped by character count. |
 | Shell safety | The allowlist is a guardrail against a confused model, not a sandbox. The security boundary is the unprivileged account. |
 | Layout | `src/persistbot/` package, `bot.py` launcher at the repo root so `/opt/persistbot/bot.py ./conf/raven.yaml` works as the design doc shows. |
+| Not adopted | Goose and Hermes: their system prompt and tool schemas are too large for a 3B model, and their schedulers are unreliable unattended. LiteLLM: a large dependency for endpoints that already speak the OpenAI protocol. `pydantic-ai-slim` was the fallback had we not wanted to own the loop. Do not reopen these without the owner. |
 
 ## Core model: goals and attempts
 
@@ -189,7 +216,34 @@ Deliverables:
   bot's own persona and fails with exit 2 on any missing piece.
 - `conf/keys_example.json`, `conf/provider.json` and `conf/persona.json`
   with one local OpenAI-compatible example and OpenRouter. `conf/keys.json`
-  is ignored by git (added to `.gitignore` in phase 0).
+  is ignored by git (added to `.gitignore` in phase 0). The shipped files
+  must resolve the personas named in `conf/init.yaml`:
+  - `Bichon`, the bot's own persona: a self-hosted model on the LAN, provider
+    `bichon`, with a placeholder URL the operator edits.
+  - `Antelope`, the friend, taken from the design doc:
+
+    ```json
+    "Antelope": {
+      "model": "ggml-org/Ministral-3-3B-Instruct-2512-GGUF:Q8_0",
+      "provider": "openrouter",
+      "vendor": "Mistral",
+      "character": "You are an AI Linux administrator.",
+      "parameters": {
+        "temperature": 1.1, "top_p": 0.96,
+        "presence_penalty": 0.5, "frequency_penalty": 0.5
+      }
+    }
+    ```
+
+    That model ID is the doc's example, and it is a small model. The
+    operator is expected to point `Antelope` at a stronger one before
+    phase 5 is used.
+  - `provider.json` carries `openrouter` with driver `openai`, URL
+    `https://openrouter.ai/api/v1`, and the same four optional parameters.
+  - `keys_example.json` carries empty `key` entries for `bichon`,
+    `openrouter`, `openai`, `xai` and `aws`.
+- Parameters: `timeout` is taken by the client. Every other parameter is
+  passed through to the chat completion request unchanged.
 - `driver.py`: `call(model, messages, tools) -> Reply`, with a `DRIVERS` map
   holding only `openai`. `Reply` carries text, tool calls, token usage.
 - Error classification, the piece recovery depends on:
@@ -223,9 +277,18 @@ Deliverables:
   | `note(text)` | Work note on the current goal, shown to later attempts |
   | `goal_done(summary)` | Declare the goal complete |
 
-- `allowlist.py`: the unprivileged list from the design doc, matched left
-  anchored as `^<command>(\s|$)`, with the wildcard names (`ls*`, `?zip`,
-  `?unzip`) expanded so the wildcard part matches only `[A-Za-z0-9_-]`. The
+- `allowlist.py`: the unprivileged list from the design doc, which is
+  exactly:
+
+  ```
+  awk, cat, chmod, cp, diff, file, find, free, grep, head, host,
+  hostname, kill, killall, ln, logger, ls, mkdir, mv, ps, pwd, rm, rmdir,
+  sort, tail, tar, umask, uniq, unzip, which, zcat, zgrep, zip
+  ```
+
+  plus three wildcard names: `ls*`, `?zip`, `?unzip`. Commands are matched
+  left anchored as `^<command>(\s|$)`, with the wildcard names
+  expanded so the wildcard part matches only `[A-Za-z0-9_-]`. The
   command is split with `shlex` and run without a shell, with a timeout and
   an output cap. Any of `; & | $ < >`, a backtick, a newline or another
   control character rejects the command before matching. `sudo` is rejected
@@ -237,7 +300,15 @@ Deliverables:
 - `evals/`: a script that runs about twenty small tasks against the six real
   schemas and prints the act-when-it-should rate per persona. Appendix A
   asks for this before trusting any 3B model. It needs the LAN model, so the
-  operator runs it; the phase ships the script and the task file.
+  operator runs it; the phase ships the script and the task file. Appendix A
+  names the models to compare: Ministral 3B, Qwen3.5-4B, Gemma 4 small and
+  Granite 4.2 3B. Keep whichever acts most often when it should. The
+  benchmark it cites had Ministral 3B avoiding wrong calls reliably but
+  acting only half the time it should have, so the tasks must include cases
+  where doing nothing is the wrong answer.
+- `umask` is a shell builtin. Run without a shell it is either missing or
+  has no effect. It stays on the list as the design doc has it, and a
+  missing command comes back to the model as a tool error.
 
 Acceptance: allowlist tests include the design doc's own counterexample
 (`ls\nrm\x20/tmp/...`), pipes, substitutions, absolute-path commands and
@@ -269,7 +340,14 @@ Deliverables:
   `goal_done` only after checking the result.
 - `deploy/persistbot@.service` and `deploy/persistbot@.timer` examples
   running as an unprivileged user, plus a short `README.md` covering
-  install, config and the status command.
+  install, config and the status command. The README must warn that some
+  model servers default to a small context window and truncate silently
+  (Ollama's default is 4096 tokens), so the operator sets the context size
+  on the server.
+- `skills` in the config is a list of names under the bot's base directory.
+  The design doc puts "skills and tools available" in the system prompt but
+  does not define a skill beyond that. In the MVP the names are loaded and
+  validated only; phase 9 gives them content.
 - Fault-injection tests against the fake server, which are the acceptance
   test for the MVP:
   - 429 on the first call: goal stays active, exit 75, `not_before` set,
@@ -295,13 +373,19 @@ First after the MVP because it is the critical success factor.
 - Deterministic triggers in the harness, since a small model seldom notices
   it is stuck: the failure limit of three, the same tool and arguments
   repeated, and `goal_done` contradicted by a check. These call the friend
-  on the model's behalf.
+  on the model's behalf. Appendix A's full trigger list, for reference: N
+  consecutive tool errors, a malformed tool call, the turn budget spent, the
+  same tool and arguments repeated, and "done" without the check passing.
+  The second and third are already counted failures in the core model;
+  decide at the start of the phase whether consecutive tool errors needs
+  its own trigger.
 - `phone_a_friend(persona, question)` tool as the optional model-initiated
   path. The system prompt lists friends with their topic, as in "for help
   with python, phone Antelope". It replaces `write_file` or `read_file` in
   the tool list only if the six-tool cap needs it; decide with eval data.
-- The call sends the friend the goal, notes, attempt summaries and the last
-  errors, with a friend-side system prompt asking for concrete next steps a
+- The call sends the friend the goal, notes, attempt summaries, the last
+  errors and any gossip rows about that friend, with a friend-side system
+  prompt asking for concrete next steps a
   small model can follow. The reply is stored as a note marked as advice,
   the failure counter resets once, and the goal returns to `active`.
 - Limits: escalations per goal (default two), then `stuck` for an operator.
@@ -337,6 +421,8 @@ says to; the trigger rule is settled at the start of the phase.
 - A tick with no goal and no plan step takes one To Do item and runs it as a
   goal. The item is removed when taken; the goal's own record is the audit
   trail. Optional off-hours window in config.
+- A To Do item may turn into a plan (phase 6). It is still removed from the
+  list when taken; the plan carries it from there.
 
 ## Phase 8: operations
 
@@ -352,7 +438,14 @@ says to; the trigger rule is settled at the start of the phase.
 Personality store, skills documents attached to custom tools, sending
 finished plans and repair scripts upstream to share between nodes, chat
 notifications (Mattermost or Slack webhook), pipelines in `run_shell`,
-drivers other than `openai`, a model running on the node itself.
+drivers other than `openai`, a model running on the node itself, shipping
+logs to an ELK stack.
+
+Keys from somewhere other than `keys.json`: environment variables, a secrets
+manager, or no key at all on a cloud VM whose role authorises the model
+service. The design doc keeps `keys.json` separate from `provider.json` for
+this reason. Bedrock's OpenAI-compatible endpoint is untested for tool
+calling and must be tested before any plan depends on it.
 
 ## Open questions
 
@@ -378,3 +471,12 @@ named.
    failures, then the goal waits for an operator until phase 5 exists.
 7. **Model eval** (phase 3). Needs a LAN model the build sessions cannot
    reach. Default: the script ships and the operator runs it.
+
+## Owner decisions
+
+Answers the owner has given. They are settled; do not ask again.
+
+- Phase 1 as merged in pull request 2 stays. The later commit on the old
+  branch that removed it is not wanted.
+- The design doc is not copied into the repo. The details the phases need
+  are written into this plan instead.

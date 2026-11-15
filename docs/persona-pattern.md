@@ -113,9 +113,14 @@ written. These are the decisions:
 | Parameter values are strings cast per driver | Native JSON numbers; a string is a `ConfigurationError` |
 | Keyless self-hosted provider still needs a dummy key | Entry must exist; an empty `key` is accepted and a placeholder is sent |
 | Six drivers | `openai` only |
+| `temperature`, `timeout` and `reasoning` are first-class parameters, the rest ride in `extra` | `timeout` goes to the client; every other parameter is passed to the request as given |
+| `ResolvedModel.routing` carries client and referrer headers from global config | Not ported |
+| Renaming a persona silently breaks the callers that use the old name | A test resolves every persona named in the shipped `conf/init.yaml` against the shipped persona files |
 
 ## Required tests
 
 Unknown persona, missing provider entry, missing keys entry, parameter
 override order across all three layers, character fallback, duplicate name
-across two files, persona-level field inside `parameters`, unknown driver.
+across two files, persona-level field inside `parameters`, unknown driver,
+and the shipped `conf/init.yaml` resolving against the shipped persona,
+provider and example keys files.
