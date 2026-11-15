@@ -221,6 +221,8 @@ __marimo__/
 
 # Persist Bot secrets and per-bot state
 conf/keys.json
+conf/provider.json
+conf/persona*.json
 *.db
 *.db-wal
 *.db-shm
