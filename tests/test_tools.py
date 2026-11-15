@@ -183,6 +183,18 @@ def test_run_shell_redirect_order_decides_where_errors_go(ctx):
     assert "No such file" in (ctx.base / "out.txt").read_text()
 
 
+def test_run_shell_output_to_a_file_is_bounded(ctx):
+    started = time.monotonic()
+    result = run(ctx, "run_shell", command="cat /dev/zero > dump")
+    assert not result.ok and "cut off" in result.text
+    assert (ctx.base / "dump").stat().st_size == shell.FILE_CAP
+    result = run(ctx, "run_shell", command="cat /dev/zero | cat >> dump")
+    assert not result.ok and (ctx.base / "dump").stat().st_size == 2 * shell.FILE_CAP
+    assert time.monotonic() - started < 5
+    ctx.shell_timeout = 0.3  # /dev/null needs no bound; only the clock stops it
+    assert run(ctx, "run_shell", command="cat /dev/zero > /dev/null").text.startswith("stopped: still")
+
+
 def test_run_shell_redirect_to_a_fifo_is_refused_without_blocking(ctx):
     os.mkfifo(ctx.base / "pipe")
     started = time.monotonic()

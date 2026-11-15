@@ -16,6 +16,7 @@ from persistbot import allowlist, log
 from persistbot.tools import Context, Result, files
 
 OUTPUT_CAP = 4000  # bytes of output returned to the model
+FILE_CAP = 1_000_000  # bytes one command may write through `> file`
 # The commands see only these, so nothing the harness was started with
 # (a key in the environment, a proxy) leaks into a command's output.
 ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "TZ")
@@ -65,6 +66,11 @@ def run_shell(ctx: Context, command: str) -> Result:
     # One pipe carries everything the model is shown: the last command's
     # output and every command's errors, in the order they are written.
     shown_read, shown_write = os.pipe()
+    # Output for `> file` passes through the harness, so it can be bounded:
+    # written straight to the file, `cat /dev/zero > x` would fill the disk.
+    copy_read = copy_write = None
+    if target is not None and pipeline.stdout != "/dev/null":
+        copy_read, copy_write = os.pipe()
     procs: list[subprocess.Popen] = []
     names = " | ".join(item.argv[0] for item in pipeline.commands)
     feed = subprocess.DEVNULL  # stdin of the next command
@@ -73,7 +79,8 @@ def run_shell(ctx: Context, command: str) -> Result:
         for number, item in enumerate(pipeline.commands):
             last = number == len(pipeline.commands) - 1
             if last:
-                out, next_feed = (shown_write if target is None else target), None
+                out = shown_write if target is None else (copy_write or target)
+                next_feed = None
             else:
                 next_feed, out = os.pipe()
             err = {"show": shown_write, "null": subprocess.DEVNULL, "stdout": out}[item.stderr]
@@ -98,17 +105,43 @@ def run_shell(ctx: Context, command: str) -> Result:
                 break
     finally:
         os.close(shown_write)
-        if target is not None:
+        if copy_write is not None:
+            os.close(copy_write)
+        elif target is not None:
             os.close(target)
     if failure:
         _kill(procs)
         for proc in procs:
             proc.wait()
-        os.close(shown_read)
+        for fd in (shown_read, copy_read, target if copy_read is not None else None):
+            if fd is not None:
+                os.close(fd)
         return Result(False, failure)
 
     output = bytearray()
     overflow = threading.Event()
+    file_overflow = threading.Event()
+
+    def copy() -> None:
+        written = 0
+        with os.fdopen(copy_read, "rb", buffering=0) as source, \
+                os.fdopen(target, "wb", buffering=0) as sink:
+            while True:
+                chunk = source.read(65536)
+                if not chunk:
+                    return
+                room = FILE_CAP - written
+                sink.write(chunk[:room])
+                written += len(chunk)
+                if written > FILE_CAP:
+                    file_overflow.set()
+                    _kill(procs)
+                    return
+
+    copier = None
+    if copy_read is not None:
+        copier = threading.Thread(target=copy, daemon=True)
+        copier.start()
 
     def read() -> None:
         with os.fdopen(shown_read, "rb", buffering=0) as stream:
@@ -134,11 +167,16 @@ def run_shell(ctx: Context, command: str) -> Result:
             _kill(procs)
             proc.wait()
     reader.join(timeout=5)
+    if copier is not None:
+        copier.join(timeout=5)
 
     text = bytes(output[:OUTPUT_CAP]).decode("utf-8", errors="replace").rstrip("\n")
     code = procs[-1].returncode
     if overflow.is_set():
         status = f"stopped: output passed {OUTPUT_CAP} bytes and was cut off. Narrow the command."
+        ok = False
+    elif file_overflow.is_set():
+        status = f"stopped: more than {FILE_CAP} bytes went to the file, which was cut off there"
         ok = False
     elif timed_out:
         status = f"stopped: still running after {ctx.shell_timeout:g} seconds"

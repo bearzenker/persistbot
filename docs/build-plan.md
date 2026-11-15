@@ -440,7 +440,8 @@ Pipes and redirection (issue 9, after phase 3):
 - Redirection is a fixed set: `2>/dev/null` and `2>&1` on any command;
   `>/dev/null`, `> file` and `>> file` on the last. The file follows the
   `write_file` rules (under the base directory, not harness state) and
-  may not be a hard link.
+  may not be a hard link or a FIFO. At most 1,000,000 bytes go to the
+  file in one call; past that the pipeline is killed.
 - Refused, each with its own message: `;`, `&&`, `||`, `&`, `<`,
   backticks, `$(...)`, and `$NAME`, `${NAME}`, `$1`, `$?` outside single
   quotes. They are refused rather than passed as text because without a
