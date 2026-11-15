@@ -211,6 +211,29 @@ def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx):
     assert not result.ok and "command not found" in result.text
 
 
+def test_run_shell_pipeline_that_cannot_be_set_up_leaves_nothing_running(ctx, monkeypatch):
+    started = []
+    real_popen, real_pipe = shell.subprocess.Popen, os.pipe
+    calls = {"pipe": 0}
+
+    def popen(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        started.append(proc)
+        return proc
+
+    def pipe():
+        calls["pipe"] += 1
+        if calls["pipe"] == 3:  # shown, first link, then the second link fails
+            raise OSError(24, "Too many open files")
+        return real_pipe()
+
+    monkeypatch.setattr(shell.subprocess, "Popen", popen)
+    monkeypatch.setattr(shell.os, "pipe", pipe)
+    result = run(ctx, "run_shell", command="tail -f /dev/null | cat | cat")
+    assert not result.ok and "cannot start the pipeline" in result.text
+    assert len(started) == 1 and started[0].returncode is not None  # killed and reaped
+
+
 def test_run_shell_pipeline_is_capped_and_timed(ctx):
     started = time.monotonic()
     result = run(ctx, "run_shell", command="cat /dev/zero | cat")

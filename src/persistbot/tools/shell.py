@@ -82,7 +82,13 @@ def run_shell(ctx: Context, command: str) -> Result:
                 out = shown_write if target is None else (copy_write or target)
                 next_feed = None
             else:
-                next_feed, out = os.pipe()
+                try:
+                    next_feed, out = os.pipe()
+                except OSError as exc:  # out of descriptors: stop what has started
+                    failure = f"error: cannot start the pipeline: {exc.strerror or exc}"
+                    if feed != subprocess.DEVNULL:
+                        os.close(feed)
+                    break
             err = {"show": shown_write, "null": subprocess.DEVNULL, "stdout": out}[item.stderr]
             try:
                 procs.append(subprocess.Popen(
