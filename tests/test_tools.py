@@ -237,6 +237,33 @@ def test_write_file_refuses_directories_and_oversize(ctx):
     assert not big.ok and not (ctx.base / "big").exists()
 
 
+def test_write_file_through_a_hard_link_leaves_the_other_name_alone(ctx, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep me")
+    os.link(outside, ctx.base / "alias-out")
+    os.link(ctx.base / "state.db", ctx.base / "alias-db")
+    before = (ctx.base / "state.db").read_bytes()
+    assert run(ctx, "write_file", path="alias-out", content="new").ok
+    assert run(ctx, "write_file", path="alias-db", content="new").ok
+    assert outside.read_text() == "keep me"
+    assert (ctx.base / "state.db").read_bytes() == before
+    assert (ctx.base / "alias-out").read_text() == "new"
+    assert ctx.db.goal(ctx.goal_id) is not None  # the database still works
+    assert not list(ctx.base.glob(".write-*"))
+
+
+def test_write_file_keeps_the_mode_of_a_file_it_replaces(ctx):
+    script = ctx.base / "fix.sh"
+    script.write_text("old")
+    script.chmod(0o750)
+    assert run(ctx, "write_file", path="fix.sh", content="new").ok
+    assert script.read_text() == "new" and script.stat().st_mode & 0o777 == 0o750
+    assert run(ctx, "write_file", path="plain.txt", content="x").ok
+    umask = os.umask(0)
+    os.umask(umask)
+    assert (ctx.base / "plain.txt").stat().st_mode & 0o777 == 0o666 & ~umask
+
+
 # remember, note, goal_done ----------------------------------------------
 
 
@@ -297,9 +324,11 @@ def test_memory_block_is_newest_first_and_capped(ctx):
     assert memory.prompt_block(ctx.db) == ""
     for number in range(5):
         run(ctx, "remember", text=f"fact number {number} " + "z" * 40)
-    block = memory.prompt_block(ctx.db, max_chars=120)
+    block = memory.prompt_block(ctx.db, max_chars=180)
     lines = block.splitlines()[1:]
     assert [line.split()[3] for line in lines] == ["4", "3"]
+    assert len(block) <= 180  # the cap covers the heading and bullets too
+    assert memory.prompt_block(ctx.db, max_chars=60) == ""
     assert "fact number 0" in memory.prompt_block(ctx.db)
 
 

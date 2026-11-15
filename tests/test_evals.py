@@ -120,3 +120,12 @@ def test_main_stops_a_persona_on_a_fatal_error_and_reports_bad_config(tmp_path, 
     assert evals.main([str(conf / "bot.yaml")]) == 1
     assert "provider refused" in capsys.readouterr().out
     assert evals.main([str(conf / "bot.yaml"), "-p", "Nobody"]) == 2
+
+
+def test_empty_file_content_is_not_an_invalid_call(model, fakellm):
+    task = {"id": "e", "goal": "create an empty file named flag", "expect": ["write_file"]}
+    fakellm.add(
+        fake.tool_call("write_file", {"path": "flag", "content": ""}),
+        fake.tool_call("write_file", {"path": " ", "content": ""}),
+    )
+    assert [evals.ask(model, task)[0] for _ in range(2)] == ["acted", "invalid"]

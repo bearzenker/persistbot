@@ -6,12 +6,16 @@ directory, and never touch the harness's own state there.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 from persistbot.tools import Context, Result
 
 READ_CAP = 8000        # characters returned to the model
 WRITE_CAP = 100_000    # characters accepted in one write
+_UMASK = os.umask(0)
+os.umask(_UMASK)
 PROTECTED = ("state.db", "state.db-wal", "state.db-shm", "bot.lock")
 
 
@@ -22,6 +26,32 @@ def _resolve(ctx: Context, path: str) -> Path:
     if not target.is_absolute():
         target = ctx.base / target
     return target.resolve()  # follows symlinks, so a link cannot lead a write outside
+
+
+def _replace(target: Path, content: str) -> None:
+    """Write a new file and move it into place.
+
+    Writing through the existing name would also change every hard link to
+    it: `ln state.db alias` would make `alias` a way to truncate the
+    database, or a link to a file outside the base a way to write there.
+    Replacing the name leaves the other links and their content alone.
+    """
+    mode = target.stat().st_mode & 0o777 if target.exists() else None
+    handle, name = tempfile.mkstemp(dir=target.parent, prefix=".write-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as out:
+            out.write(content)
+            if mode is not None:
+                os.fchmod(out.fileno(), mode)  # a script stays executable
+            else:
+                os.fchmod(out.fileno(), 0o666 & ~_UMASK)
+        os.replace(name, target)
+    except BaseException:
+        try:
+            os.unlink(name)
+        except OSError:
+            pass
+        raise
 
 
 def read_file(ctx: Context, path: str) -> Result:
@@ -60,7 +90,7 @@ def write_file(ctx: Context, path: str, content: str) -> Result:
         if target.parent == base and target.name in PROTECTED:
             return Result(False, f"error: {target.name} belongs to the harness and cannot be written")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        _replace(target, content)
     except (OSError, ValueError) as exc:
         return Result(False, f"error: cannot write {path}: {getattr(exc, 'strerror', None) or exc}")
     return Result(True, f"wrote {len(content)} characters to {target}")

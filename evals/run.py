@@ -37,6 +37,7 @@ TASKS = Path(__file__).resolve().parent / "tasks.json"
 VERDICTS = ("acted", "silent", "wrong", "invalid", "error")
 RETRIES = 2
 MAX_WAIT = 60.0
+MAY_BE_EMPTY = {("write_file", "content")}  # an empty file is a valid thing to write
 
 # Phase 4 ships the real system.txt. Until then this stands in for it.
 SYSTEM = (
@@ -96,7 +97,7 @@ def score(task: dict, reply: driver.Reply) -> tuple[str, str]:
     if isinstance(parsed, tools.Result):
         return "invalid", detail
     _, values = parsed
-    if not all(value.strip() for value in values.values()):
+    if not all(value.strip() for arg, value in values.items() if (call.name, arg) not in MAY_BE_EMPTY):
         return "invalid", detail  # an empty argument: the real tool would refuse it
     if call.name in task.get("forbid", []) or call.name not in task["expect"]:
         return "wrong", detail

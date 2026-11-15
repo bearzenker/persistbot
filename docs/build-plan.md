@@ -396,7 +396,12 @@ As built:
   base directory.
 - `write_file` resolves symbolic links before the base-directory check,
   accepts at most 100,000 characters, creates parent directories, and
-  refuses `state.db`, its WAL files and `bot.lock`.
+  refuses `state.db`, its WAL files and `bot.lock`. It writes a temporary
+  file and renames it into place, so writing through a hard link (`ln
+  state.db alias`) replaces that name only and cannot change the linked
+  file. A replaced file keeps its mode. `rm`, `mv` and `cp` through
+  `run_shell` can still damage the bot's own state; that is the guardrail's
+  limit.
 - `read_file` and `cat` can read `conf/keys.json`, because reads go
   anywhere the account can (open question 4) and the bot's account owns
   that file. The content would then be sent to the model provider. Not
@@ -405,7 +410,8 @@ As built:
 - `remember` collapses whitespace, caps a fact at 300 characters and skips
   an exact duplicate. `note` caps a note at 1,000 characters.
 - `memory.prompt_block(db)` is the text for the system prompt: kind
-  `memory` only, newest first, 1,500 characters by default.
+  `memory` only, newest first, 1,500 characters by default including the
+  heading and bullets.
 - The six schemas are about 1,800 characters of JSON, roughly 450 tokens.
 - `evals/run.py [conf.yaml] [-p PERSONA ...] [-v] [--delay S]` sends each
   task in `evals/tasks.json` (21 tasks) as one request and scores the first
