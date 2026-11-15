@@ -1,0 +1,16 @@
+{
+  "bichon": {
+    "driver": "openai",
+    "url": "http://lan-model-host.example:8080/v1"
+  },
+  "openrouter": {
+    "driver": "openai",
+    "url": "https://openrouter.ai/api/v1",
+    "parameters": {
+      "temperature": 1.1,
+      "top_p": 0.96,
+      "presence_penalty": 0.5,
+      "frequency_penalty": 0.5
+    }
+  }
+}

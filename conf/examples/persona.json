@@ -1,0 +1,22 @@
+{
+  "Bichon": {
+    "model": "ggml-org/Ministral-3-3B-Instruct-2512-GGUF:Q8_0",
+    "provider": "bichon",
+    "vendor": "Mistral",
+    "parameters": {
+      "temperature": 0.2,
+      "timeout": 300
+    }
+  },
+  "Antelope": {
+    "model": "REPLACE-WITH-OPENROUTER-MODEL-ID",
+    "provider": "openrouter",
+    "character": "You are an AI Linux administrator.",
+    "parameters": {
+      "temperature": 1.1,
+      "top_p": 0.96,
+      "presence_penalty": 0.5,
+      "frequency_penalty": 0.5
+    }
+  }
+}
