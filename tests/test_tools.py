@@ -131,9 +131,12 @@ def test_run_shell_does_not_use_a_shell(ctx):
 
 
 def test_run_shell_missing_command_is_a_tool_error(ctx):
-    # umask is a shell builtin: on the list, but there is nothing to execute.
-    result = run(ctx, "run_shell", command="umask 022")
-    assert not result.ok and "command not found" in result.text and "umask" in result.text
+    # Allowed by the `ls*` wildcard, and certain not to be installed. `umask`
+    # is no use here: some systems (Fedora) ship /usr/bin/umask, which runs
+    # and changes nothing.
+    result = run(ctx, "run_shell", command="ls-no-such-command_persistbot -x")
+    assert not result.ok and not result.malformed
+    assert "command not found" in result.text and "ls-no-such-command_persistbot" in result.text
 
 
 def test_run_shell_output_is_capped_and_the_command_stopped(ctx):

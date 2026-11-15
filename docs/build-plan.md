@@ -388,6 +388,9 @@ As built:
   not. `grep 'a|b'` and `awk '{print $1}'` are therefore refused, which
   leaves `awk` of little use. No shell also means no glob or `~`
   expansion: `ls *.log` looks for a file with that literal name.
+- `umask` behaves as the plan predicted, by system: where there is no
+  such executable the model gets "command not found"; Fedora ships
+  `/usr/bin/umask`, which exits 0 and changes nothing.
 - `ls*` allows any command whose name starts with `ls` (`lsblk`, `lscpu`,
   `lsof`); `?zip` and `?unzip` allow one leading character (`gzip`,
   `gunzip`).
