@@ -36,6 +36,9 @@ def _open_target(ctx: Context, pipeline: allowlist.Pipeline) -> int | None:
     if pipeline.stdout == "/dev/null":
         return os.open(os.devnull, os.O_WRONLY)
     target = files.writable(ctx, pipeline.stdout)
+    if target.exists() and not target.is_file():
+        # A FIFO would block the open until something read it.
+        raise ValueError(f"{target} is not a regular file")
     if target.exists() and target.stat().st_nlink > 1:
         # Writing in place would change the other names of the same file.
         raise ValueError(f"{target} is a hard link; write to a different name")

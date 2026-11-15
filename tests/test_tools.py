@@ -175,6 +175,23 @@ def test_run_shell_redirect_cannot_leave_base_or_touch_harness_state(ctx, tmp_pa
     assert (ctx.base / "state.db").read_bytes() == before
 
 
+def test_run_shell_redirect_order_decides_where_errors_go(ctx):
+    shown = run(ctx, "run_shell", command="cat missing 2>&1 > out.txt")
+    assert "No such file" in shown.text and (ctx.base / "out.txt").read_text() == ""
+    hidden = run(ctx, "run_shell", command="cat missing > out.txt 2>&1")
+    assert hidden.text == "exit code 1\n(no output)"
+    assert "No such file" in (ctx.base / "out.txt").read_text()
+
+
+def test_run_shell_redirect_to_a_fifo_is_refused_without_blocking(ctx):
+    os.mkfifo(ctx.base / "pipe")
+    started = time.monotonic()
+    for operator in (">", ">>"):
+        result = run(ctx, "run_shell", command=f"pwd {operator} pipe")
+        assert not result.ok and "not a regular file" in result.text
+    assert time.monotonic() - started < 2
+
+
 def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx):
     result = run(ctx, "run_shell", command="rm -r . | ls-no-such-command_persistbot")
     assert not result.ok and "command not found" in result.text

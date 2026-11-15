@@ -217,6 +217,10 @@ def parse(command: str) -> Pipeline:
                 if pipeline.stdout is not None:
                     raise Rejected("only one > is allowed in a command")
                 pipeline.stdout, pipeline.append = following[1], append
+                if current.stderr == "stdout":
+                    # `2>&1 > file`: redirections apply left to right, so the
+                    # errors went to where output pointed before, the model.
+                    current.stderr = "show"
 
     if not pipeline.commands[-1].argv:
         if len(pipeline.commands) > 1:

@@ -182,6 +182,13 @@ def test_stdout_redirect_on_the_last_command():
     assert parse("ls a2>out").commands[0].argv == ["ls", "a2"]  # only a bare 2 is a stream
 
 
+def test_redirections_apply_left_to_right():
+    after = parse("cat missing > out 2>&1")
+    assert after.stdout == "out" and after.commands[0].stderr == "stdout"
+    before = parse("cat missing 2>&1 > out")
+    assert before.stdout == "out" and before.commands[0].stderr == "show"
+
+
 @pytest.mark.parametrize(
     "command",
     [
