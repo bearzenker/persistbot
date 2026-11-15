@@ -96,6 +96,8 @@ def score(task: dict, reply: driver.Reply) -> tuple[str, str]:
     if isinstance(parsed, tools.Result):
         return "invalid", detail
     _, values = parsed
+    if not all(value.strip() for value in values.values()):
+        return "invalid", detail  # an empty argument: the real tool would refuse it
     if call.name in task.get("forbid", []) or call.name not in task["expect"]:
         return "wrong", detail
     for arg, pattern in task.get("match", {}).get(call.name, {}).items():

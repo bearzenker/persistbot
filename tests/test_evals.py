@@ -66,9 +66,10 @@ def test_each_verdict(model, fakellm):
         fake.tool_call("note", {"text": "hmm"}),                   # wrong: not expected
         fake.tool_call("run_shell", "{broken"),                    # invalid
         fake.tool_call("make_coffee", {}),                         # invalid
+        fake.tool_call("run_shell", {"command": "  "}),            # invalid: empty argument
     )
-    verdicts = [evals.ask(model, TASKS[0])[0] for _ in range(6)]
-    assert verdicts == ["acted", "silent", "wrong", "wrong", "invalid", "invalid"]
+    verdicts = [evals.ask(model, TASKS[0])[0] for _ in range(7)]
+    assert verdicts == ["acted", "silent", "wrong", "wrong", "invalid", "invalid", "invalid"]
     assert fakellm.unscripted == 0
 
 
