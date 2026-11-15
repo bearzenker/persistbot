@@ -7,6 +7,7 @@ has passed the allowlist. Time and output are bounded.
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -62,6 +63,11 @@ def run_shell(ctx: Context, command: str) -> Result:
     env = {key: os.environ[key] for key in ENV_KEEP if key in os.environ}
     env["LC_ALL"] = "C"
     ctx.base.mkdir(parents=True, exist_ok=True)
+    # Find every command before starting any, so a pipeline with a missing
+    # command runs nothing at all.
+    for item in pipeline.commands:
+        if shutil.which(item.argv[0], path=env.get("PATH")) is None:
+            return Result(False, f"error: command not found on this node: {item.argv[0]}")
     try:
         target = _open_target(ctx, pipeline)
     except (OSError, ValueError) as exc:

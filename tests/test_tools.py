@@ -204,11 +204,19 @@ def test_run_shell_redirect_to_a_fifo_is_refused_without_blocking(ctx):
     assert time.monotonic() - started < 2
 
 
-def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx):
-    result = run(ctx, "run_shell", command="rm -r . | ls-no-such-command_persistbot")
+def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx, monkeypatch):
+    (ctx.base / "keep.txt").write_text("x")
+    started = []
+    real_popen = shell.subprocess.Popen
+    monkeypatch.setattr(
+        shell.subprocess, "Popen", lambda *a, **k: started.append(a) or real_popen(*a, **k)
+    )
+    result = run(ctx, "run_shell", command="rm keep.txt | ls-no-such-command_persistbot")
     assert not result.ok and "command not found" in result.text
     result = run(ctx, "run_shell", command="ls-no-such-command_persistbot | cat > out.txt")
     assert not result.ok and "command not found" in result.text
+    assert started == [] and (ctx.base / "keep.txt").exists()
+    assert not (ctx.base / "out.txt").exists()
 
 
 def test_run_shell_pipeline_that_cannot_be_set_up_leaves_nothing_running(ctx, monkeypatch):
