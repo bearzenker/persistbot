@@ -23,7 +23,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 |---|---|---|---|
 | 0 | This plan | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
-| 2 | Driver: persona resolution, OpenAI client, error classes | `phase-2-driver` | not started |
+| 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | in progress |
 | 3 | Tools: allowlisted shell, files, memory, notes | `phase-3-tools` | not started |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
 | 5 | Phone a friend | `phase-5-friend` | not started |
@@ -42,8 +42,11 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 and 1 are merged. No phase is in progress.
-- **Next:** phase 2 (driver). Read `docs/persona-pattern.md` first.
+- **State:** phases 0 and 1 are merged. Phase 2 is in progress on
+  `claude/awesome-maxwell-8j67y6`. Nothing of it is built yet.
+- **Next:** phase 2 in this order: `persona.py` with its tests,
+  `conf/examples/`, `tests/fakellm.py`, `driver.py` with its tests, then
+  persona resolution at startup in `cli.py`.
 - **Waiting on the owner:** nothing. Open questions use their defaults.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
