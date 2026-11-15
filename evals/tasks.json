@@ -18,7 +18,7 @@
   {"id": "disk-filling", "goal": "The disk is filling up. Find out what is taking the space.",
    "expect": ["run_shell"]},
   {"id": "gzip-log", "goal": "Compress /var/log/app/app.log.1 with gzip.",
-   "expect": ["run_shell"], "match": {"run_shell": {"command": "app\\.log\\.1"}}},
+   "expect": ["run_shell"], "match": {"run_shell": {"command": "^\\s*(gzip|ls|file)\\b.*app\\.log\\.1"}}},
   {"id": "write-script", "goal": "Write a shell script named cleanup.sh that deletes files under /tmp/app older than 7 days.",
    "expect": ["write_file"], "match": {"write_file": {"path": "cleanup\\.sh$", "content": "find|rm"}}},
   {"id": "remember-fact", "goal": "The application logs on this node are in /srv/app/logs. Save that as a lasting fact.",

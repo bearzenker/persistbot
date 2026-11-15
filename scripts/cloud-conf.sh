@@ -20,11 +20,13 @@ done
 
 write() {  # write <VAR> <path>: validate as a JSON object, then write
     printenv "$1" | python3 -c '
-import json, sys
+import json, os, sys
 doc = json.load(sys.stdin)
 if not isinstance(doc, dict) or not doc:
     sys.exit("not a non-empty JSON object")
-json.dump(doc, open(sys.argv[1], "w"), indent=2)
+with open(sys.argv[1], "w") as out:
+    os.fchmod(out.fileno(), 0o600)  # an existing file keeps its old mode otherwise
+    json.dump(doc, out, indent=2)
 ' "$2" || { echo "cloud-conf: $1 is not usable JSON" >&2; exit 1; }
     echo "cloud-conf: wrote $2 from \$$1"
 }
