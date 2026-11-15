@@ -74,23 +74,29 @@ def read_file(ctx: Context, path: str) -> Result:
     return Result(True, text if text else "(the file is empty)")
 
 
+def writable(ctx: Context, path: str) -> Path:
+    """The resolved path if a file may be written there, else ValueError for the model."""
+    base = ctx.base.resolve()
+    target = _resolve(ctx, path)
+    if target != base and base not in target.parents:
+        raise ValueError(f"files can be written only under {base}. Use a relative path.")
+    if target == base or target.is_dir():
+        raise ValueError(f"{target} is a directory")
+    if target.parent == base and target.name in PROTECTED:
+        raise ValueError(f"{target.name} belongs to the harness and cannot be written")
+    return target
+
+
 def write_file(ctx: Context, path: str, content: str) -> Result:
     if len(content) > WRITE_CAP:
         return Result(False, f"error: content is over {WRITE_CAP} characters; write a smaller file")
     try:
-        base = ctx.base.resolve()
-        target = _resolve(ctx, path)
-        if target != base and base not in target.parents:
-            return Result(
-                False,
-                f"error: files can be written only under {base}. Use a relative path.",
-            )
-        if target == base or target.is_dir():
-            return Result(False, f"error: {target} is a directory")
-        if target.parent == base and target.name in PROTECTED:
-            return Result(False, f"error: {target.name} belongs to the harness and cannot be written")
+        target = writable(ctx, path)
+    except ValueError as exc:
+        return Result(False, f"error: {exc}")
+    try:
         target.parent.mkdir(parents=True, exist_ok=True)
         _replace(target, content)
-    except (OSError, ValueError) as exc:
-        return Result(False, f"error: cannot write {path}: {getattr(exc, 'strerror', None) or exc}")
+    except OSError as exc:
+        return Result(False, f"error: cannot write {path}: {exc.strerror or exc}")
     return Result(True, f"wrote {len(content)} characters to {target}")

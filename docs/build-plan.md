@@ -42,15 +42,17 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 to 3 are done. Phase 3 is finished on
+- **State:** phases 0 to 3 are merged. No phase is in progress. Issue 9
+  (pipes and redirection in `run_shell`) is finished on
   `claude/youthful-pasteur-jy7xzm` and waits for the owner to merge its
-  pull request. No phase is in progress.
-- **Next:** phase 4 (tick loop, the MVP), once phase 3 is on `main`. Read
-  "Core model" and the phase 2 and 3 "As built" notes first. The loop calls
-  `tools.schemas()` and `tools.call(ctx, name, arguments)`; tests that need
-  a model use the `fakellm` fixture.
-- **Waiting on the owner:** merge of phase 3. Open question 3 (pipes) has
-  new evidence under phase 3 "As built"; the default stands until answered.
+  pull request.
+- **Next:** phase 4 (tick loop, the MVP), once the issue 9 pull request is
+  on `main`. Read "Core model" and the phase 2 and 3 "As built" notes
+  first. The loop calls `tools.schemas()` and `tools.call(ctx, name,
+  arguments)`; tests that need a model use the `fakellm` fixture.
+- **Waiting on the owner:** merge of the issue 9 pull request. Issues 7
+  (keys file readable) and 8 (`find -exec`) are backlog by the owner's
+  decision; do not fix them unasked.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
@@ -95,7 +97,7 @@ are collected at the end with the default this plan assumes.
 | SDK retries | `max_retries=0`, `timeout=300`. The harness owns retry policy: it defers to the next tick. |
 | Tool budget | At most six tool schemas in any one request, each description one or two lines. Later phases swap tools by mode instead of adding to the list. |
 | Prompt budget | System prompt plus tool schemas under about 1,500 tokens. Memory injected into the prompt is capped by character count. |
-| Shell safety | The allowlist is a guardrail against a confused model, not a sandbox. The security boundary is the unprivileged account. |
+| Shell safety | The allowlist is a guardrail against a confused model, not a sandbox. The security boundary is the unprivileged account. No shell is used: the harness reads the command line itself, and every command in a pipeline must be on the list. |
 | Layout | `src/persistbot/` package, `bot.py` launcher at the repo root so `/opt/persistbot/bot.py ./conf/raven.yaml` works as the design doc shows. |
 | Not adopted | Goose and Hermes: their system prompt and tool schemas are too large for a 3B model, and their schedulers are unreliable unattended. LiteLLM: a large dependency for endpoints that already speak the OpenAI protocol. `pydantic-ai-slim` was the fallback had we not wanted to own the loop. Do not reopen these without the owner. |
 
@@ -342,6 +344,7 @@ Deliverables:
   an output cap. Any of `; & | $ < >`, a backtick, a newline or another
   control character rejects the command before matching. `sudo` is rejected
   until phase 8.
+  *Superseded by issue 9: see "Pipes and redirection" below.*
 - Tool errors are returned to the model as tool results, never raised.
 - Memory: `remember` writes to `memory` with a kind column (`memory` now;
   `gossip` and `personality` later use the same table). Rows are injected
@@ -384,10 +387,8 @@ As built:
 - The command gets a reduced environment (`PATH`, `HOME`, `USER`,
   `LOGNAME`, `LANG`, `TMPDIR`, `TZ`, and `LC_ALL=C`), so a key or proxy
   setting in the harness's environment does not reach command output.
-- The forbidden characters are rejected anywhere in the command, quoted or
-  not. `grep 'a|b'` and `awk '{print $1}'` are therefore refused, which
-  leaves `awk` of little use. No shell also means no glob or `~`
-  expansion: `ls *.log` looks for a file with that literal name.
+- No shell means no wildcard or `~` expansion: `ls *.log` looks for a
+  file with that literal name.
 - `umask` behaves as the plan predicted, by system: where there is no
   such executable the model gets "command not found"; Fedora ships
   `/usr/bin/umask`, which exits 0 and changes nothing.
@@ -425,11 +426,34 @@ As built:
   on OpenRouter): acted on 18 of 21, never silent, no invalid calls. That
   model is not one of the 3B candidates; the comparison Appendix A asks
   for is still the operator's to run on the LAN.
-- Evidence for open question 3: in that run the model reached for pipes
-  and redirection unprompted (`ps aux | grep nginx`, `ps aux --sort=-%mem
-  | head`, `find ... 2>/dev/null`) and for commands off the list (`df`,
-  `netstat`). After a rejection it recovered with a plain command. Each
-  such rejection costs one of the twelve turns.
+- In that run the model reached for pipes and redirection unprompted
+  (`ps aux | grep nginx`, `find ... 2>/dev/null`) and for commands off the
+  list (`df`, `netstat`). That led to issue 9.
+
+Pipes and redirection (issue 9, after phase 3):
+
+- `allowlist.parse(command)` replaces `check`. It reads the command line
+  itself, with shell quoting rules, into a `Pipeline` of `Command`s. There
+  is still no shell.
+- `a | b | c` is allowed, up to six commands, and every one must be on the
+  list. `ls | python3` is refused.
+- Redirection is a fixed set: `2>/dev/null` and `2>&1` on any command;
+  `>/dev/null`, `> file` and `>> file` on the last. The file follows the
+  `write_file` rules (under the base directory, not harness state) and
+  may not be a hard link.
+- Refused, each with its own message: `;`, `&&`, `||`, `&`, `<`,
+  backticks, `$(...)`, and `$NAME`, `${NAME}`, `$1`, `$?` outside single
+  quotes. They are refused rather than passed as text because without a
+  shell they would silently do something other than what was meant.
+- Inside single quotes everything is text, so `awk '{print $1}'` and
+  `grep 'a|b'` work. A `$` that does not start a variable (`grep "end$"`)
+  is text too.
+- Line breaks and control characters are refused anywhere, quoted or not.
+- The model is shown the last command's output and every command's
+  errors. The exit code is the last command's. The time and output limits
+  cover the whole pipeline; all its processes are killed together.
+- Not done, on purpose: variables, wildcards, `cd`, command sequences.
+  Each call still starts in the base directory.
 
 ## Phase 4: tick loop (MVP)
 
@@ -577,10 +601,10 @@ named.
 2. **Where `driver` and `url` live** (phase 2). CandidSail keeps them on the
    persona; the design doc adds `provider.json`. Default: `provider.json`
    supplies them and a persona may override either.
-3. **Pipes in `run_shell`** (phase 3). Default: rejected in the MVP, so the
-   model runs one command per call. `grep`, `awk` and `sort` lose some value
-   without pipes; allowing pipelines of allowlisted commands is a contained
-   addition if wanted.
+3. **Pipes in `run_shell`** (phase 3). *Answered 2026-11-15, issue 9:*
+   pipelines are allowed, with every command checked against the
+   allowlist, and a fixed set of redirections. No shell is used. See
+   "Pipes and redirection" under phase 3.
 4. **`write_file` scope** (phase 3). Default: writes only under the bot's
    base directory; reads anywhere the account can read.
 5. **SQLite versus the design doc's "existing MCP module"** (phase 1).
@@ -606,3 +630,10 @@ Answers the owner has given. They are settled; do not ask again.
   with persona `Raven` (`cohere/north-mini-code:free` on OpenRouter) and a
   disposable pre-paid key. Sessions use them for live checks through
   `scripts/cloud-conf.sh`. The key must not leave that environment.
+- **Pipes** (2026-11-15, issue 9). The owner chose pipelines built by the
+  harness, each command checked against the allowlist, over running
+  commands through `bash -c`.
+- **Backlog by decision** (2026-11-15). Issue 7 (`read_file` and `cat` can
+  read `conf/keys.json`) and issue 8 (`find -exec` and similar options run
+  commands that are not on the list) are accepted development risk for
+  now. They stay open as issues and are not to be fixed unasked.

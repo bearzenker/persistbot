@@ -114,12 +114,82 @@ def test_run_shell_no_output(ctx):
 
 @pytest.mark.parametrize(
     "command",
-    ["ls\nrm\x20/tmp/x", "cat hello.txt | grep hi", "cat $(which ls)", "/bin/ls", "sudo ls", "python3 -V"],
+    ["ls\nrm\x20/tmp/x", "cat hello.txt | python3", "cat $(which ls)", "/bin/ls", "sudo ls",
+     "python3 -V", "ls; ls", "ls && ls", "cat $HOME/x", "ls > ../out.txt", "ls > state.db",
+     "ls 2> err.txt"],
 )
 def test_run_shell_rejections_are_tool_results(ctx, command):
     result = run(ctx, "run_shell", command=command)
     assert not result.ok and not result.malformed
     assert result.text.startswith("error: command not run:")
+
+
+def test_run_shell_pipeline(ctx):
+    (ctx.base / "f.txt").write_text("b 2\na 1\nb 3\n")
+    result = run(ctx, "run_shell", command="cat f.txt | sort | head -2")
+    assert result.ok and result.text == "exit code 0\na 1\nb 2"
+    result = run(ctx, "run_shell", command="awk '{print $1}' f.txt | sort | uniq -c | sort -rn")
+    assert result.ok and result.text.split() == ["exit", "code", "0", "2", "b", "1", "a"]
+
+
+def test_run_shell_pipeline_reports_the_last_exit_code_and_every_error(ctx):
+    (ctx.base / "f.txt").write_text("x\n")
+    result = run(ctx, "run_shell", command="cat missing f.txt | grep -c x")
+    assert result.ok and "No such file" in result.text and result.text.endswith("1")
+    result = run(ctx, "run_shell", command="cat f.txt | grep nothing")
+    assert not result.ok and result.text == "exit code 1\n(no output)"
+
+
+def test_run_shell_stderr_redirects(ctx):
+    quiet = run(ctx, "run_shell", command="cat missing 2>/dev/null")
+    assert quiet.text == "exit code 1\n(no output)"
+    merged = run(ctx, "run_shell", command="cat missing 2>&1 | grep -c 'No such file'")
+    assert merged.ok and merged.text == "exit code 0\n1"
+    unmerged = run(ctx, "run_shell", command="cat missing | grep -c 'No such file'")
+    assert unmerged.text.startswith("exit code 1\n")  # the error bypassed the pipe
+
+
+def test_run_shell_writes_and_appends_to_a_file_under_base(ctx):
+    (ctx.base / "f.txt").write_text("one\n")
+    assert run(ctx, "run_shell", command="cat f.txt > sub/out.txt").text == "exit code 0\n(no output)"
+    assert run(ctx, "run_shell", command="cat f.txt | sort >> sub/out.txt").ok
+    assert (ctx.base / "sub" / "out.txt").read_text() == "one\none\n"
+    assert run(ctx, "run_shell", command="cat f.txt > sub/out.txt").ok
+    assert (ctx.base / "sub" / "out.txt").read_text() == "one\n"
+    assert run(ctx, "run_shell", command="cat f.txt > /dev/null").text == "exit code 0\n(no output)"
+
+
+def test_run_shell_redirect_cannot_leave_base_or_touch_harness_state(ctx, tmp_path):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    os.link(victim, ctx.base / "alias")
+    os.link(ctx.base / "state.db", ctx.base / "alias-db")
+    (ctx.base / "link").symlink_to(tmp_path)
+    before = (ctx.base / "state.db").read_bytes()
+    for target in ("../victim.txt", str(victim), "link/victim.txt", "alias", "alias-db",
+                   "state.db", "bot.lock", "."):
+        for operator in (">", ">>"):
+            result = run(ctx, "run_shell", command=f"pwd {operator} {target}")
+            assert not result.ok and result.text.startswith("error: command not run:"), target
+    assert victim.read_text() == "keep me"
+    assert (ctx.base / "state.db").read_bytes() == before
+
+
+def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx):
+    result = run(ctx, "run_shell", command="rm -r . | ls-no-such-command_persistbot")
+    assert not result.ok and "command not found" in result.text
+    result = run(ctx, "run_shell", command="ls-no-such-command_persistbot | cat > out.txt")
+    assert not result.ok and "command not found" in result.text
+
+
+def test_run_shell_pipeline_is_capped_and_timed(ctx):
+    started = time.monotonic()
+    result = run(ctx, "run_shell", command="cat /dev/zero | cat")
+    assert not result.ok and "cut off" in result.text
+    ctx.shell_timeout = 0.5
+    result = run(ctx, "run_shell", command="tail -f /dev/null | cat | cat")
+    assert not result.ok and "still running after 0.5 seconds" in result.text
+    assert time.monotonic() - started < 8
 
 
 def test_run_shell_does_not_use_a_shell(ctx):

@@ -67,9 +67,9 @@ def _registry() -> dict[str, Tool]:
     tools = (
         Tool(
             "run_shell",
-            "Run one allowed command on this node and return its output. "
-            "No pipes, redirection or variables.",
-            {"command": "The command line, for example: ls -la /var/log"},
+            "Run an allowed command on this node, or several joined with |, and return "
+            "the output. No ; or && and no $VARIABLES.",
+            {"command": "The command line, for example: ps aux | grep nginx"},
             shell.run_shell,
         ),
         Tool(
