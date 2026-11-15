@@ -48,8 +48,7 @@ Persist Bot; CandidSail carries `driver` and `url` on the persona.
 }
 ```
 
-`conf/keys.json`: keyed by lowercase provider name, never committed.
-`conf/keys_example.json` is the committed template. The entry shape belongs
+`conf/keys.json`: keyed by lowercase provider name. The entry shape belongs
 to the driver; the `openai` driver reads `key`.
 
 ```json
@@ -58,6 +57,11 @@ to the driver; the `openai` driver reads `key`.
   "bichon":     { "key": "" }
 }
 ```
+
+None of the three live files is committed. The repo carries examples in
+`conf/examples/` (`persona.json`, `provider.json`, `keys.json`) for the
+operator to copy into `conf/`. The examples are in their own directory so
+the `conf/persona*.json` discovery never loads one as live config.
 
 ## Resolution
 
@@ -112,6 +116,7 @@ written. These are the decisions:
 | Agent names are unvalidated | Must match `[A-Za-z0-9_-]+` |
 | Parameter values are strings cast per driver | Native JSON numbers; a string is a `ConfigurationError` |
 | Keyless self-hosted provider still needs a dummy key | Entry must exist; an empty `key` is accepted and a placeholder is sent |
+| Persona files are committed; `keys_example.json` is the only template | No live persona, provider or keys file is committed; examples for all three are in `conf/examples/` |
 | Six drivers | `openai` only |
 | `temperature`, `timeout` and `reasoning` are first-class parameters, the rest ride in `extra` | `timeout` goes to the client; every other parameter is passed to the request as given |
 | `ResolvedModel.routing` carries client and referrer headers from global config | Not ported |
@@ -122,5 +127,5 @@ written. These are the decisions:
 Unknown persona, missing provider entry, missing keys entry, parameter
 override order across all three layers, character fallback, duplicate name
 across two files, persona-level field inside `parameters`, unknown driver,
-and the shipped `conf/init.yaml` resolving against the shipped persona,
-provider and example keys files.
+and the shipped `conf/init.yaml` resolving against the files in
+`conf/examples/`.

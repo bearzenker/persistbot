@@ -213,20 +213,26 @@ Deliverables:
 - `persona.py`: discover and merge `conf/persona*.json`, load
   `conf/provider.json` and the keys file, and `resolve(name, persona,
   character=None, parameters=None) -> ResolvedModel`. Startup resolves the
-  bot's own persona and fails with exit 2 on any missing piece.
-- `conf/keys_example.json`, `conf/provider.json` and `conf/persona.json`
-  with one local OpenAI-compatible example and OpenRouter. `conf/keys.json`
-  is ignored by git (added to `.gitignore` in phase 0). The shipped files
-  must resolve the personas named in `conf/init.yaml`:
-  - `Bichon`, the bot's own persona: a self-hosted model on the LAN, provider
-    `bichon`, with a placeholder URL the operator edits.
-  - `Antelope`, the friend, taken from the design doc:
+  bot's own persona and fails with exit 2 on any missing piece. When a live
+  file is absent the error names the example to copy.
+- The repo carries examples only. The live `conf/persona*.json`,
+  `conf/provider.json` and `conf/keys.json` belong to each installation and
+  are ignored by git. The examples live in `conf/examples/` as
+  `persona.json`, `provider.json` and `keys.json`; the operator copies them
+  into `conf/` and edits them. They sit in their own directory so that the
+  `conf/persona*.json` discovery cannot load an example as live config.
+- The examples must resolve the personas named in `conf/init.yaml`:
+  - `Bichon`, the bot's own persona: a self-hosted model on the LAN,
+    provider `bichon`, model
+    `ggml-org/Ministral-3-3B-Instruct-2512-GGUF:Q8_0`, with a placeholder
+    URL. That ID is a Hugging Face GGUF repo and quantisation tag, the form
+    a llama.cpp server takes.
+  - `Antelope`, the friend, from the design doc:
 
     ```json
     "Antelope": {
-      "model": "ggml-org/Ministral-3-3B-Instruct-2512-GGUF:Q8_0",
+      "model": "REPLACE-WITH-OPENROUTER-MODEL-ID",
       "provider": "openrouter",
-      "vendor": "Mistral",
       "character": "You are an AI Linux administrator.",
       "parameters": {
         "temperature": 1.1, "top_p": 0.96,
@@ -235,13 +241,15 @@ Deliverables:
     }
     ```
 
-    That model ID is the doc's example, and it is a small model. The
-    operator is expected to point `Antelope` at a stronger one before
-    phase 5 is used.
+    The design doc's example gave `Antelope` the GGUF ID above. OpenRouter
+    does not accept that form, so the example moves it to `Bichon` and
+    leaves the friend's model for the operator to choose. It should be a
+    stronger model than the bot's own.
   - `provider.json` carries `openrouter` with driver `openai`, URL
-    `https://openrouter.ai/api/v1`, and the same four optional parameters.
-  - `keys_example.json` carries empty `key` entries for `bichon`,
-    `openrouter`, `openai`, `xai` and `aws`.
+    `https://openrouter.ai/api/v1`, and the same four optional parameters,
+    and `bichon` with driver `openai` and a placeholder LAN URL.
+  - `keys.json` carries empty `key` entries for `bichon`, `openrouter`,
+    `openai`, `xai` and `aws`.
 - Parameters: `timeout` is taken by the client. Every other parameter is
   passed through to the chat completion request unchanged.
 - `driver.py`: `call(model, messages, tools) -> Reply`, with a `DRIVERS` map
@@ -480,3 +488,5 @@ Answers the owner has given. They are settled; do not ask again.
   branch that removed it is not wanted.
 - The design doc is not copied into the repo. The details the phases need
   are written into this plan instead.
+- Live persona, provider and keys files are not added to the repo. It
+  carries examples only (phase 2).

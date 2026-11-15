@@ -70,7 +70,8 @@ A session can end without warning, so unpushed work is lost work.
 - All logging goes through `persistbot.log`. No direct `logging` or `print`
   calls elsewhere.
 - No test may need a real model or the network. Use `tests/fakellm.py`.
-- `conf/keys.json` is never committed.
+- Live `conf/keys.json`, `conf/provider.json` and `conf/persona*.json` are
+  never committed. The repo carries examples only, in `conf/examples/`.
 - The harness runs as an unprivileged user. Nothing may require root before
   phase 8, and then only through the sudo allowlist.
 
