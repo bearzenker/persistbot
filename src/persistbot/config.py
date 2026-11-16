@@ -119,6 +119,14 @@ def _limits(value: Any) -> Limits:
     return Limits(**raw)
 
 
+def _skill(value: Any) -> str:
+    """A skill is a name under the bot's base directory. Phase 9 gives it content."""
+    name = _text("bot.skills", value)
+    if not NAME_RE.fullmatch(name):
+        raise ConfigError(f"bot.skills: '{name}' may contain only letters, digits, '_' and '-'")
+    return name
+
+
 def load(path: str | Path) -> BotConfig:
     path = Path(path)
     try:
@@ -174,7 +182,7 @@ def load(path: str | Path) -> BotConfig:
         friends=friends,
         logging=logging,
         reporting=_sink(venv, "bot.reporting", bot.get("reporting"), logging.dir),
-        skills=tuple(_text("bot.skills", s) for s in skills),
+        skills=tuple(_skill(s) for s in skills),
         incoming=(
             _path(venv, "bot.incoming", bot["incoming"])
             if "incoming" in bot

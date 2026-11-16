@@ -9,9 +9,8 @@ import sqlite3
 import time
 from pathlib import Path
 
-from persistbot import EXIT_CONFIG, EXIT_OK, __version__, log, persona, store
+from persistbot import EXIT_CONFIG, EXIT_OK, __version__, log, persona, store, tick
 from persistbot.config import BotConfig, ConfigError, load
-from persistbot.lock import TickLock
 
 DEFAULT_CONF = Path("conf") / "init.yaml"
 CONF_SUFFIXES = (".yaml", ".yml")
@@ -95,30 +94,6 @@ def status(config: BotConfig) -> int:
     return EXIT_OK
 
 
-def tick(config: BotConfig, prompts: list[tuple[str, str]]) -> int:
-    """One wake-up. Phase 1 queues input and stops; the tool loop comes in phase 4."""
-    lock = TickLock(config.lock_path)
-    if not lock.acquire():
-        log.action("another tick holds the lock; exiting")
-        return EXIT_OK
-    try:
-        with store.Store(config.db_path) as db:
-            for text, source in prompts:
-                goal_id, created = db.add_goal(text, source)
-                if created:
-                    log.action(f"goal {goal_id} queued from {source}")
-                else:
-                    log.action(f"goal {goal_id} is already open with this prompt; not queued again")
-            waiting = db.goals(store.OPEN_STATES)
-            if waiting:
-                log.action(f"{len(waiting)} open goal(s); no runner in this build yet")
-            else:
-                log.action("tick: nothing to do")
-        return EXIT_OK
-    finally:
-        lock.release()
-
-
 def main(argv: list[str] | None = None, home: Path | None = None) -> int:
     args = _parser().parse_intermixed_args(argv)
     words = list(args.words)
@@ -145,20 +120,20 @@ def main(argv: list[str] | None = None, home: Path | None = None) -> int:
         prompts = []
         if args.file:
             prompts.append(_read_prompt_file(config, args.file))
-        if words:
+        if " ".join(words).strip():
             prompts.append((" ".join(words), "cli"))
         try:
             model = _resolve(config)
         except persona.PersonaError as exc:
             # Queue the input before giving up, so a prompt is never dropped.
-            tick(config, prompts)
+            tick.run(config, None, prompts)
             log.error(str(exc))
             return EXIT_CONFIG
         log.action(
             f"persona {config.persona}: model {model.model} via {model.driver} "
             f"at {model.url or 'the driver default'}"
         )
-        return tick(config, prompts)
+        return tick.run(config, model, prompts)
     except ConfigError as exc:
         log.error(str(exc))
         return EXIT_CONFIG

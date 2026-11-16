@@ -63,7 +63,7 @@ def fakellm():
 def make_conf(tmp_path):
     """Write a bot config under tmp_path, with persona files beside it."""
 
-    def make(body: str = "", name: str = "Raven") -> "Path":
+    def make(body: str = "", name: str = "Raven", url: str | None = None) -> "Path":
         venv = tmp_path / "opt"
         venv.mkdir(exist_ok=True)
         text = textwrap.dedent(
@@ -77,7 +77,10 @@ def make_conf(tmp_path):
         ) + textwrap.indent(textwrap.dedent(body), "  ")
         path = tmp_path / "bot.yaml"
         path.write_text(text)
-        if not (tmp_path / "persona.json").exists():
+        (venv / "system.txt").write_text("You are a test agent. Use tools.")
+        if url is not None:
+            write_conf_dir(tmp_path, url=url)
+        elif not (tmp_path / "persona.json").exists():
             write_conf_dir(tmp_path)
         return path
 

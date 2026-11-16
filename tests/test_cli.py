@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from persistbot import EXIT_CONFIG, EXIT_OK, store
+from persistbot import EXIT_CONFIG, EXIT_OK, EXIT_TEMPFAIL, store
 from persistbot.cli import main
 from persistbot.lock import TickLock
 
@@ -54,13 +54,14 @@ def test_prompt_words_and_file_are_queued_once(make_conf, tmp_path):
     b.mkdir(parents=True)
     (b / "log_check.txt").write_text("Check /var/log for errors.\n")
     args = [str(conf), "-f", "log_check.txt", "report", "disk", "use"]
-    assert main(args) == EXIT_OK
-    assert main(args) == EXIT_OK  # same input again: still two goals
+    # Nothing listens at the test persona's URL, so each tick defers a goal.
+    assert main(args) == EXIT_TEMPFAIL
+    assert main(args) == EXIT_TEMPFAIL  # same input again: still two goals
     with store.Store(b / "state.db") as db:
         goals = db.goals()
     assert [(g["prompt"], g["state"]) for g in goals] == [
-        ("Check /var/log for errors.", "queued"),
-        ("report disk use", "queued"),
+        ("Check /var/log for errors.", "active"),
+        ("report disk use", "active"),
     ]
     assert goals[0]["source"] == f"file:{b / 'log_check.txt'}"
     assert goals[1]["source"] == "cli"
@@ -77,8 +78,9 @@ def test_status(make_conf, tmp_path, capsys):
         db.end_attempt(attempt, store.BUDGET, "12 turns")
     assert main([str(conf), "status"]) == EXIT_OK
     out = capsys.readouterr().out
-    assert "goal 1 [queued]" in out and "report disk use" in out
-    assert "budget  12 turns" in out
+    assert "goal 1 [active]" in out and "report disk use" in out
+    assert "deferrals=1" in out and "waiting until" in out
+    assert "deferred  connection failed" in out and "budget  12 turns" in out
 
 
 def test_config_errors_exit_2(make_conf, tmp_path, capsys):
@@ -103,7 +105,7 @@ def test_default_config_is_home_conf_init_yaml(make_conf, tmp_path):
     (home / "conf").mkdir(parents=True)
     (home / "conf" / "init.yaml").write_text(make_conf().read_text())
     write_conf_dir(home / "conf")
-    assert main(["tidy", "up"], home=home) == EXIT_OK
+    assert main(["tidy", "up"], home=home) == EXIT_TEMPFAIL
     with store.Store(base(tmp_path) / "state.db") as db:
         assert db.goals()[0]["prompt"] == "tidy up"
 
@@ -136,8 +138,8 @@ def test_unresolvable_persona_exits_2_but_still_queues_the_prompt(make_conf, tmp
     assert lock.acquire()  # the failed start released it
     lock.release()
 
-    write_conf_dir(tmp_path)  # the operator fixes it; the goal is still there
-    assert main([str(conf)]) == EXIT_OK
+    write_conf_dir(tmp_path)  # the operator fixes it; the goal is still there and now runs
+    assert main([str(conf)]) == EXIT_TEMPFAIL
     with store.Store(base(tmp_path) / "state.db") as db:
         assert len(db.goals()) == 1
 

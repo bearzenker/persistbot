@@ -45,11 +45,13 @@ end without warning, so it must be true at every pushed commit.
 - **State:** phases 0 to 3 and issue 9 (pipes in `run_shell`) are merged.
   Phase 4 (tick loop, the MVP) is in progress on
   `claude/youthful-pasteur-jy7xzm`.
-- **Finished in phase 4:** nothing yet.
-- **Next:** `src/persistbot/tick.py` (the seven steps in the phase 4
-  section), `system.txt`, the fault-injection tests, then `deploy/` and
-  `README.md`. The loop calls `tools.schemas()` and `tools.call(ctx, name,
-  arguments)`; tests that need a model use the `fakellm` fixture.
+- **Finished in phase 4:** `src/persistbot/tick.py` (lock, crash
+  recovery, ingest including `incoming/`, work selection, prompt, tool
+  loop, outcome and exit code), `system.txt`, and `tests/test_tick.py`
+  covering every fault-injection case in the phase 4 list.
+- **Next:** `deploy/persistbot@.service` and `.timer`, `README.md`, one
+  live goal as persona `Raven`, the phase 4 "As built" notes, then set the
+  row to `done`.
 - **Waiting on the owner:** nothing. Issues 7 (keys file readable) and 8
   (`find -exec`) are backlog by the owner's decision; do not fix them
   unasked.
