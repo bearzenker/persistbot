@@ -21,7 +21,10 @@ ExecStart=/opt/persistbot/.venv/bin/python /opt/persistbot/bot.py conf/%i.yaml
 # tick. 1: an attempt ended without finishing; the goal is still open.
 # Neither is a fault of this unit. Exit 2 (configuration) still fails it.
 SuccessExitStatus=75 1
-# A tick is bounded by max_turns and the model timeout. This is a backstop.
-TimeoutStartSec=30min
+# A backstop only. A tick is bounded by max_turns times the model timeout
+# plus tool time: 12 turns of 300 s and a 60 s command is 72 minutes with
+# the defaults. A tick killed here is recorded as a crashed attempt, so
+# keep this above that worst case if you raise either limit.
+TimeoutStartSec=2h
 NoNewPrivileges=yes
 ProtectSystem=full
