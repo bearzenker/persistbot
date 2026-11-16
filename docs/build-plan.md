@@ -25,7 +25,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 | 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
 | 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | done |
-| 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `claude/youthful-pasteur-jy7xzm` | in progress |
+| 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `claude/youthful-pasteur-jy7xzm` | done |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
 | 7 | To Do list | `phase-7-todo` | not started |
@@ -42,17 +42,16 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 to 3 and issue 9 (pipes in `run_shell`) are merged.
-  Phase 4 (tick loop, the MVP) is in progress on
-  `claude/youthful-pasteur-jy7xzm`.
-- **Finished in phase 4:** `src/persistbot/tick.py` (lock, crash
-  recovery, ingest including `incoming/`, work selection, prompt, tool
-  loop, outcome and exit code), `system.txt`, and `tests/test_tick.py`
-  covering every fault-injection case in the phase 4 list.
-- **Next:** `deploy/persistbot@.service` and `.timer`, `README.md`, one
-  live goal as persona `Raven`, the phase 4 "As built" notes, then set the
-  row to `done`.
-- **Waiting on the owner:** nothing. Issues 7 (keys file readable) and 8
+- **State:** phases 0 to 4 are done. Phase 4 (the MVP) is finished on
+  `claude/youthful-pasteur-jy7xzm` and waits for the owner to merge its
+  pull request. No phase is in progress.
+- **Next:** phase 5 (phone a friend), once phase 4 is on `main`. Read
+  "Core model", `docs/persona-pattern.md` and the phase 4 "As built" notes
+  first. The stuck state and the failure counter it escalates from are in
+  `tick._count_failure`.
+- **Waiting on the owner:** merge of phase 4; then one real goal on a VM
+  against the LAN model through the systemd timer, and the tag `v0.1.0`.
+  Build sessions cannot do either. Issues 7 (keys file readable) and 8
   (`find -exec`) are backlog by the owner's decision; do not fix them
   unasked.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
@@ -509,6 +508,55 @@ Deliverables:
 
 Done when: all of the above pass, and the operator has run one real goal on
 a VM against a LAN model through the systemd timer. Tag `v0.1.0`.
+
+As built:
+
+- `tick.run(config, model, prompts)` is the whole wake-up; `cli.main`
+  resolves the persona and calls it. With `model=None` (the persona did
+  not resolve) it still takes the lock, closes crashed attempts and queues
+  input, then returns 2.
+- One goal per tick, one attempt per tick.
+- `<venv>/system.txt` is required. If it cannot be read the tick exits 2
+  before the goal is touched. `<base>/system.txt` is optional. The system
+  prompt is those two, the identity line, then the memory block. The tool
+  list travels as the request's `tools`, not as prompt text.
+- The user message is `Goal: ...`, then the goal's notes (newest 2,000
+  characters, shown oldest first), then a summary of the last three
+  earlier attempts: outcome, detail, and the last four tool calls with
+  arguments and results cut to 160 characters. A journalled call with no
+  result is shown as `STARTED, OUTCOME UNKNOWN`.
+- A reply with no tool call gets one fixed user message asking for a tool
+  call. Three unusable replies in an attempt (no tool call, or a malformed
+  one) end it as `invalid`. The plan said "a small limit"; it is three.
+- When one reply holds several tool calls they run in order. If one of
+  them is `goal_done` the attempt ends after that reply.
+- A crashed attempt is closed by the next tick, before input is ingested,
+  and counts as a failure then. A third failure found this way makes the
+  goal `stuck` without a model call.
+- Deferral: `Retry-After` when the server sent it, else 300 seconds
+  doubling per consecutive deferral to a 3,600 second cap. A fatal
+  upstream error (401, 404 and the like) waits 3,600 seconds and writes a
+  report line. Any attempt that is not a deferral resets the deferral
+  count. Failures are never reset in the MVP.
+- Report lines: goal done, each counted failure with its number, goal
+  stuck, and a fatal upstream deferral. An ordinary deferral goes to the
+  action log only.
+- `incoming/`: regular files, sorted by name, dot-files skipped. Each is
+  queued, then moved to `incoming/done/`; a name already there gets a
+  timestamp suffix. An empty file is moved without becoming a goal.
+- A blank prompt on the command line is ignored.
+- `skills` entries must be plain names (letters, digits, `_`, `-`). They
+  are not required to exist and are not used yet.
+- Exit 1 means "attempt failed, goal still open", including the tick in
+  which a goal becomes stuck.
+- `deploy/persistbot@.service` treats exit 75 and 1 as success, so only a
+  configuration error (2) marks the unit failed. The timer fires every
+  five minutes. The units pass `systemd-analyze verify`; they have not
+  been run under systemd by a build session.
+- Version is 0.1.0. The tag is the owner's, after the VM run.
+- One live goal, 2026-11-16, persona `Raven` on OpenRouter, through
+  `bot.py`: `free`, `remember`, `write_file`, `read_file`, `goal_done` in
+  one attempt, exit 0.
 
 ## Phase 5: phone a friend
 
