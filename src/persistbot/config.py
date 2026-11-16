@@ -2,6 +2,12 @@
 
 Relative paths in the file resolve against `venv`, so `base: raven` under
 `venv: /opt/persistbot` is `/opt/persistbot/raven`.
+
+Two directories belong to a bot. `base` is the harness's: state, logs and
+the incoming queue. `work` is the model's: the only place its tools write.
+With `user` set the tools run as that Linux account, which must not be able
+to reach `base`; `work` is then `/opt/bot-<user>` beside the install
+directory unless the file says otherwise.
 """
 
 from __future__ import annotations
@@ -14,11 +20,13 @@ from typing import Any
 import yaml
 
 NAME_RE = re.compile(r"[A-Za-z0-9_-]+")
+USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+RUNNER_DIR = Path("/run/persistbot")  # where the runner socket units listen
 LOG_MODES = ("local",)
 
 BOT_KEYS = {
     "venv", "base", "system", "name", "persona", "friends", "logging",
-    "reporting", "skills", "incoming", "limits",
+    "reporting", "skills", "incoming", "limits", "user", "work", "runner",
 }
 SINK_KEYS = {"mode", "dir"}
 LIMIT_KEYS = {"max_turns", "max_failures"}
@@ -53,6 +61,9 @@ class BotConfig:
     reporting: Sink
     skills: tuple[str, ...]
     incoming: Path
+    work: Path                     # the model's working directory
+    user: str | None = None        # Linux account the tools run as; None: the harness's own
+    runner: Path | None = None     # the runner's socket; None: a child process
     limits: Limits = field(default_factory=Limits)
 
     @property
@@ -171,6 +182,30 @@ def load(path: str | Path) -> BotConfig:
     if not isinstance(skills, list):
         raise ConfigError("bot.skills: expected a list")
 
+    user = None
+    if bot.get("user") is not None:
+        user = _text("bot.user", bot["user"])
+        if not USER_RE.fullmatch(user):
+            raise ConfigError(f"bot.user: '{user}' is not a Linux account name")
+    if user is None and "runner" in bot:
+        raise ConfigError("bot.runner needs bot.user: the account the runner must run as")
+    if "work" in bot:
+        work = _path(venv, "bot.work", bot["work"])
+    elif user is not None:
+        work = venv.parent / f"bot-{user}"
+    else:
+        work = base / "work"
+    if user is not None and (work == base or base in work.parents):
+        raise ConfigError(
+            f"bot.work ({work}) is inside bot.base ({base}), which the tools account must not reach"
+        )
+    runner = None
+    if user is not None:
+        runner = (
+            _path(venv, "bot.runner", bot["runner"]) if "runner" in bot
+            else RUNNER_DIR / f"{user}.sock"
+        )
+
     logging = _sink(venv, "bot.logging", bot.get("logging"), base / "logs")
     return BotConfig(
         path=path.resolve(),
@@ -188,5 +223,8 @@ def load(path: str | Path) -> BotConfig:
             if "incoming" in bot
             else base / "incoming"
         ),
+        work=work,
+        user=user,
+        runner=runner,
         limits=_limits(bot.get("limits")),
     )

@@ -1,8 +1,9 @@
 """The tools the model may call, and the one way to call them.
 
 `schemas()` is what goes in the request. `call()` runs one tool call and
-always returns a `Result`: a tool error is an answer for the model, never an
-exception for the tick.
+returns a `Result`: a tool error is an answer for the model, never an
+exception for the tick. The one exception is `link.RunnerError`: the
+runner cannot be used at all, which no reply to the model can fix.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from persistbot.link import Link, RunnerError
 from persistbot.store import Store
 
 MAX_TOOLS = 6
@@ -22,10 +24,15 @@ class Context:
     """What a tool needs to know about the tick it runs in."""
 
     db: Store
-    base: Path                 # the bot's base directory
+    link: Link                 # the runner: every command and file access goes through it
     goal_id: int
     attempt_id: int | None = None
     shell_timeout: float = 60.0
+
+    @property
+    def work(self) -> Path:
+        """The model's working directory."""
+        return self.link.work
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,17 @@ class Result:
     text: str                  # what the model is told
     done: str | None = None    # the summary, when the model called goal_done
     malformed: bool = False    # the call itself was unusable; counts toward `invalid`
+
+
+def answer(reply: dict, limit: int) -> Result:
+    """A runner's reply as a tool result. The runner is not trusted to keep
+    its own limits: it runs on the account the model's commands run on."""
+    text = reply.get("text")
+    if not isinstance(text, str) or not text:
+        return Result(False, "error: the runner gave no usable answer")
+    if len(text) > limit:
+        text = text[:limit] + "\n[cut off]"
+    return Result(reply.get("ok") is True, text)
 
 
 @dataclass(frozen=True)
@@ -152,5 +170,7 @@ def call(ctx: Context, name: str, arguments: str) -> Result:
     tool, values = parsed
     try:
         return tool.handler(ctx, **values)
+    except RunnerError:
+        raise  # no tool can run at all: the tick's business, not the model's
     except Exception as exc:  # a tool must never end the tick
         return Result(False, f"error: {name} failed: {type(exc).__name__}: {exc}")

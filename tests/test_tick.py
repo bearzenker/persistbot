@@ -16,6 +16,7 @@ class Bot:
     def __init__(self, conf, tmp_path, llm):
         self.conf, self.llm = conf, llm
         self.base = tmp_path / "opt" / "raven"
+        self.work = self.base / "work"
         self.venv = tmp_path / "opt"
 
     def tick(self, *words):
@@ -69,7 +70,7 @@ def happy_path():
 def test_a_goal_runs_to_goal_done(bot):
     bot.llm.add(*happy_path())
     assert bot.tick(GOAL) == EXIT_OK
-    assert (bot.base / "hello.txt").read_text() == "hello\n"
+    assert (bot.work / "hello.txt").read_text() == "hello\n"
     goal = bot.goal()
     assert goal["state"] == "done" and goal["summary"] == "wrote hello.txt and read it back"
     (attempt,) = bot.attempts()
@@ -148,7 +149,7 @@ def test_at_most_four_tool_calls_run_from_one_reply(bot):
     many = [("write_file", {"path": f"f{n}.txt", "content": "x"}) for n in range(6)]
     bot.llm.add(fake.tool_calls(many), call("goal_done", summary="wrote what was allowed"))
     assert bot.tick(GOAL) == EXIT_OK
-    assert sorted(p.name for p in bot.base.glob("f*.txt")) == ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]
+    assert sorted(p.name for p in bot.work.glob("f*.txt")) == ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]
     with bot.db() as db:
         assert len(db.tool_calls(1)) == 5  # four writes and goal_done
     answers = [m for m in bot.sent(-1) if m["role"] == "tool"]
@@ -160,7 +161,7 @@ def test_nothing_runs_after_goal_done_in_the_same_reply(bot):
     bot.llm.add(fake.tool_calls([("goal_done", {"summary": "finished"}),
                                  ("write_file", {"path": "late.txt", "content": "x"})]))
     assert bot.tick(GOAL) == EXIT_OK
-    assert bot.goal()["state"] == "done" and not (bot.base / "late.txt").exists()
+    assert bot.goal()["state"] == "done" and not (bot.work / "late.txt").exists()
 
 
 # upstream errors: deferral, never failure --------------------------------

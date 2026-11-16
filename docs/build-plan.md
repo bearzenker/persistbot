@@ -50,13 +50,18 @@ end without warning, so it must be true at every pushed commit.
   The owner approved it on 2026-11-16; the answers are under "Owner
   decisions". The design is `docs/privilege-separation.md`; the
   deliverables and acceptance list are under "Phase 4a" below.
-- **Finished so far in 4a:** the plan changes only. No code yet.
-- **Next in 4a:** in this order: `runner.py` (standalone, standard library
-  only) with the pipeline and file code moved out of `tools/`; `link.py`,
-  the harness side, with the local child-process transport; the tools and
-  `tick.py` switched to it and the existing tests passing; then config
-  keys `user`, `work`, `runner`, the socket transport with the identity
-  and separation checks, the units, README.
+- **Finished so far in 4a:** `runner.py` (standalone, standard library
+  only) runs pipelines and file reads and writes; `link.py` starts it as a
+  child process, or connects to its socket, and checks the sender's
+  account on every reply; `tools/shell.py` and `tools/files.py` are thin
+  clients; `tick.py` opens the link before the attempt starts; config
+  keys `user`, `work`, `runner`. The model's working directory is
+  `<base>/work` without `user`, `/opt/bot-<user>` with it. All tests pass
+  through the child-process runner.
+- **Next in 4a:** tests for the link itself (wrong account, reachable
+  paths, runner killed, unreachable, oversize and late replies) and for
+  the new config keys; `status` output; the units in `deploy/`; README;
+  a real two-account check as root in a cloud session; then "As built".
 - **After 4a:** phase 5 (phone a friend). Read "Core model",
   `docs/persona-pattern.md` and the phase 4 "As built" notes first. The
   stuck state and the failure counter it escalates from are in
