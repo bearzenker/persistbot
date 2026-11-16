@@ -148,9 +148,11 @@ root.
 prints every goal, its state, and each attempt. Under the bot's log
 directory:
 
-- `report.log`: one line per finished, failed, stuck or deferred goal. This
-  is the file to watch.
-- `action.log`: what each tick did.
+- `report.log`: one line each time a goal is finished, an attempt fails, a
+  goal becomes stuck, or the model server refuses the bot outright (a bad
+  key or model name). This is the file to watch.
+- `action.log`: what each tick did, including ordinary deferrals when the
+  model server was busy or unreachable.
 - `chat.log`: the full transcript of every request, reply and tool call.
 
 A `stuck` goal stays stuck until an operator deals with it. Queueing the

@@ -144,6 +144,25 @@ def test_one_goal_per_tick_active_before_queued(bot):
     assert bot.goal(2)["state"] == "done"
 
 
+def test_at_most_four_tool_calls_run_from_one_reply(bot):
+    many = [("write_file", {"path": f"f{n}.txt", "content": "x"}) for n in range(6)]
+    bot.llm.add(fake.tool_calls(many), call("goal_done", summary="wrote what was allowed"))
+    assert bot.tick(GOAL) == EXIT_OK
+    assert sorted(p.name for p in bot.base.glob("f*.txt")) == ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]
+    with bot.db() as db:
+        assert len(db.tool_calls(1)) == 5  # four writes and goal_done
+    answers = [m for m in bot.sent(-1) if m["role"] == "tool"]
+    assert len(answers) == 6  # every call is answered, run or not
+    assert all("at most 4 tool calls" in m["content"] for m in answers[4:])
+
+
+def test_nothing_runs_after_goal_done_in_the_same_reply(bot):
+    bot.llm.add(fake.tool_calls([("goal_done", {"summary": "finished"}),
+                                 ("write_file", {"path": "late.txt", "content": "x"})]))
+    assert bot.tick(GOAL) == EXIT_OK
+    assert bot.goal()["state"] == "done" and not (bot.base / "late.txt").exists()
+
+
 # upstream errors: deferral, never failure --------------------------------
 
 

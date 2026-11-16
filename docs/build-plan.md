@@ -528,8 +528,10 @@ As built:
 - A reply with no tool call gets one fixed user message asking for a tool
   call. Three unusable replies in an attempt (no tool call, or a malformed
   one) end it as `invalid`. The plan said "a small limit"; it is three.
-- When one reply holds several tool calls they run in order. If one of
-  them is `goal_done` the attempt ends after that reply.
+- When one reply holds several tool calls they run in order, at most
+  four. Calls past the fourth, and any call after `goal_done`, are
+  answered with an error and not run or journalled. If one of them is
+  `goal_done` the attempt ends after that reply.
 - A crashed attempt is closed by the next tick, before input is ingested,
   and counts as a failure then. A third failure found this way makes the
   goal `stuck` without a model call.

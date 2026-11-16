@@ -21,6 +21,7 @@ from persistbot.config import BotConfig, ConfigError
 from persistbot.lock import TickLock
 from persistbot.persona import ResolvedModel
 
+CALLS_PER_REPLY = 4          # tool calls run from one reply; the rest are refused
 INVALID_LIMIT = 3            # unusable replies in one attempt before it ends as `invalid`
 BACKOFF_FIRST = 300.0        # seconds after the first deferral; doubles each time
 BACKOFF_CAP = 3600.0
@@ -219,7 +220,19 @@ def _attempt(config: BotConfig, model: ResolvedModel, db: store.Store,
             continue
 
         done = None
-        for call in reply.tool_calls:
+        for position, call in enumerate(reply.tool_calls):
+            if position >= CALLS_PER_REPLY or done is not None:
+                # Every call must be answered, but these are not run: a reply
+                # may not hold an unbounded amount of work, and nothing runs
+                # after goal_done.
+                why = (
+                    "the goal was already declared done" if done is not None
+                    else f"at most {CALLS_PER_REPLY} tool calls are run per reply; send it again"
+                )
+                text = f"error: not run: {why}"
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": text})
+                log.chat("tool", {"name": call.name, "ok": False, "result": text})
+                continue
             # Two journal writes: before the tool runs and after. A run that
             # dies between them leaves the first, and the next attempt is
             # told the outcome is unknown.
