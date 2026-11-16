@@ -28,7 +28,7 @@ and do not let it hold up the phases after it.
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
 | 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | done |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `claude/youthful-pasteur-jy7xzm` | done |
-| 4a | Privilege separation: tools run as a second account (`docs/privilege-separation.md`) | `phase-4a-privsep` | proposed |
+| 4a | Privilege separation: tools run as a second account (`docs/privilege-separation.md`) | `ccr-7e74e664-33adcf` | in progress |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
 | 7 | To Do list | `phase-7-todo` | not started |
@@ -45,25 +45,28 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 to 4 are done and on `main` (phase 4 merged as pull
-  request 11). No phase is in progress.
-- **Proposed, not decided:** phase 4a, privilege separation. The MVP showed
-  that a tool call can rewrite the harness's code, config and state,
-  because both run as one account in one directory. The evaluation and the
-  design are in `docs/privilege-separation.md`; its last section lists the
-  owner's decisions with defaults. If the owner accepts it, set the row to
-  `not started`, move the decisions into "Owner decisions", and build it
-  before phase 5.
-- **Next:** phase 5 (phone a friend), unless the owner has accepted 4a.
-  Read "Core model", `docs/persona-pattern.md` and the phase 4 "As built"
-  notes first. The stuck state and the failure counter it escalates from
-  are in `tick._fail`.
-- **Waiting on the owner:** the decision on phase 4a; one real goal on a VM
-  against the LAN model through the systemd timer, and the tag `v0.1.0`.
-  Build sessions cannot do the last two. Issues 7 (keys file readable) and
-  8 (`find -exec`) are backlog by the owner's decision; do not fix them
-  unasked. Phase 4a would close 7. Issue 12 (where processed prompt files
-  go) is open and not scheduled.
+- **State:** phases 0 to 4 are done and on `main`. Phase 4a (privilege
+  separation) is in progress on `ccr-7e74e664-33adcf`, pull request 13.
+  The owner approved it on 2026-11-16; the answers are under "Owner
+  decisions". The design is `docs/privilege-separation.md`; the
+  deliverables and acceptance list are under "Phase 4a" below.
+- **Finished so far in 4a:** the plan changes only. No code yet.
+- **Next in 4a:** in this order: `runner.py` (standalone, standard library
+  only) with the pipeline and file code moved out of `tools/`; `link.py`,
+  the harness side, with the local child-process transport; the tools and
+  `tick.py` switched to it and the existing tests passing; then config
+  keys `user`, `work`, `runner`, the socket transport with the identity
+  and separation checks, the units, README.
+- **After 4a:** phase 5 (phone a friend). Read "Core model",
+  `docs/persona-pattern.md` and the phase 4 "As built" notes first. The
+  stuck state and the failure counter it escalates from are in
+  `tick._fail`.
+- **Waiting on the owner:** one real goal on a VM against the LAN model
+  through the systemd timer, with two accounts, and the tag `v0.1.0`.
+  Build sessions cannot do either. Issue 8 (`find -exec`) is backlog by
+  the owner's decision; do not fix it unasked. Issue 7 (keys file
+  readable) is closed by 4a. Issue 12 (where processed prompt files go) is
+  open and not scheduled.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
@@ -574,6 +577,56 @@ As built:
   `bot.py`: `free`, `remember`, `write_file`, `read_file`, `goal_done` in
   one attempt, exit 0.
 
+## Phase 4a: privilege separation
+
+Read `docs/privilege-separation.md` first. It holds the evaluation, the
+design and the reasons; this section is the build list.
+
+The fault: the harness and the model's tool calls ran as one account, and
+the harness kept its state in the model's working directory, so a tool
+call could rewrite the allowlist, the bot's YAML, the instance prompt, the
+inbox, the logs and the database, and read the keys.
+
+Deliverables:
+
+- `runner.py`: a standalone process, standard library only, that runs an
+  already-parsed pipeline, reads a file and writes a file. It runs as the
+  bot's Linux account. The pipeline and file code moves there from
+  `tools/shell.py` and `tools/files.py`.
+- `link.py`: the harness's side. One JSON line per request and per reply,
+  a deadline and a size cap on every reply. Two transports: a child
+  process on the harness's own account (development, tests, cloud
+  sessions), and a Unix socket to a systemd socket-activated unit.
+- The allowlist stays in the harness. The runner is sent argv lists.
+- Config keys `user`, `work` and `runner`. The model's working directory
+  is separate from the bot's base directory in every mode.
+- With `user` set: the harness checks the kernel's record of which account
+  the runner's replies come from, and asks the runner whether it can reach
+  the code, config, keys or state. A wrong answer to either means no tool
+  runs. No fallback to the harness account.
+- `deploy/`: the harness unit hardened; `persistbot-runner@.socket` and
+  `persistbot-runner@.service`.
+- `status` reports whether the bot is separated.
+- README install rewritten for two accounts.
+
+Acceptance:
+
+- Every existing tool and tick test passes through the runner.
+- No tool can name the instance prompt, the inbox, the logs or the
+  database: each is a test.
+- Wrong runner account, root, or the harness's own account: exit 2, goal
+  untouched.
+- The runner reports it can write a protected path or read the keys:
+  exit 2, report line.
+- Runner killed during a call: tool error, the next call reconnects.
+- Runner unreachable at the start of a tick: exit 2, goal untouched.
+  Unreachable in the middle of an attempt: `deferred`, failure count
+  unchanged.
+- A reply over the size cap or past the deadline is a tool error.
+
+Done when those pass and the owner has run one goal on the VM with two
+accounts.
+
 ## Phase 5: phone a friend
 
 First after the MVP because it is the critical success factor.
@@ -681,10 +734,8 @@ named.
 7. **Model eval** (phase 3). Needs a LAN model the build sessions cannot
    reach. Default: the script ships and the operator runs it.
 8. **Privilege separation** (phase 4a). Raised by the owner 2026-11-16:
-   the bot can change its own configuration and code. Default until the
-   owner answers: phase 4a is not built, and the two-step stopgap under
-   "What can be done today" in `docs/privilege-separation.md` is the
-   operator's to apply on any install.
+   the bot can change its own configuration and code. *Answered
+   2026-11-16:* build it now as phase 4a. See "Owner decisions".
 
 ## Owner decisions
 
@@ -709,3 +760,24 @@ Answers the owner has given. They are settled; do not ask again.
   read `conf/keys.json`) and issue 8 (`find -exec` and similar options run
   commands that are not on the list) are accepted development risk for
   now. They stay open as issues and are not to be fixed unasked.
+- **Privilege separation** (2026-11-16, phase 4a). Approved for build
+  before phase 5:
+  - Mechanism: the runner process behind a systemd socket unit, not
+    `sudo -u`.
+  - Accounts: the harness runs as `persistbot`, the tools as the bot's own
+    account (`raven`). Creating the bot's account is the sysadmin's job,
+    not the harness's or an install script's.
+  - Layout: the application stays in one directory, `/opt/persistbot`,
+    including `conf/` and each bot's base directory
+    (`/opt/persistbot/raven`: queue, logs, state). The bot's account has
+    no access to its base directory. Its writable working directory is
+    `/opt/bot-<account>` (`/opt/bot-raven`).
+  - A bot may not queue work for itself: `incoming/` is closed to it.
+  - The owner accepts that the phase 8 sudo allowlist may not work under
+    the runner unit as shipped (`NoNewPrivileges=yes`). Phase 8 revisits
+    the unit.
+  - Network limits on tool commands: not asked for; unchanged.
+- **Allowlist additions** (2026-11-16). When a build session sees the
+  model fail on a basic, passive Linux command that is not on the list
+  (`cut` was the example), it may add the command without asking. Record
+  each addition under phase 3 "As built".

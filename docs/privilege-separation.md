@@ -1,7 +1,10 @@
 # Privilege separation: keeping the bot out of its own code and config
 
-Status: **proposal, waiting for the owner's decision.** Nothing here is
-built. If accepted it becomes phase 4a in `docs/build-plan.md`.
+Status: **accepted by the owner on 2026-11-16 and being built as phase
+4a.** The owner's answers are in "Owner decisions" in
+`docs/build-plan.md`; where they differ from a default below, they win.
+The one difference is the layout: everything stays under `/opt/persistbot`
+and the working directory is `/opt/bot-<account>`.
 
 ## The problem as it stands in the tree
 
