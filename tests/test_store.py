@@ -125,3 +125,34 @@ def test_notes_memory_and_meta(db):
     db.set_meta("k", "1")
     db.set_meta("k", "2")
     assert db.get_meta("k") == "2"
+
+
+def test_close_attempt_ends_the_attempt_and_updates_the_goal_in_one_commit(tmp_path):
+    with Store(tmp_path / "s.db") as db:
+        goal_id, _ = db.add_goal("fix it", "cli")
+        attempt = db.start_attempt(goal_id)
+        seen = []
+        db.db.set_trace_callback(seen.append)
+        db.close_attempt(attempt, "completed", "all good", state="done", summary="all good")
+        db.db.set_trace_callback(None)
+        writes = [line.split()[0] for line in seen if line.split()[0] in ("BEGIN", "UPDATE", "COMMIT")]
+        assert writes == ["BEGIN", "UPDATE", "UPDATE", "COMMIT"]
+        assert db.attempts(goal_id)[0]["outcome"] == "completed"
+        assert db.goal(goal_id)["state"] == "done" and db.open_attempts() == []
+
+
+def test_close_attempt_writes_nothing_when_the_goal_update_is_refused(tmp_path):
+    import pytest
+
+    with Store(tmp_path / "s.db") as db:
+        goal_id, _ = db.add_goal("fix it", "cli")
+        attempt = db.start_attempt(goal_id)
+        for bad in ({"state": "finished"}, {"prompt": "x"}):
+            with pytest.raises(ValueError):
+                db.close_attempt(attempt, "completed", "x", **bad)
+        with pytest.raises(ValueError):
+            db.close_attempt(attempt, "exploded")
+        with pytest.raises(ValueError):
+            db.close_attempt(999, "completed")
+        assert db.attempts(goal_id)[0]["ended_at"] is None
+        assert db.goal(goal_id)["state"] == "queued"

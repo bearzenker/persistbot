@@ -1,0 +1,30 @@
+# One tick of one bot. The instance name is the bot's config file:
+# persistbot@raven runs /opt/persistbot/conf/raven.yaml.
+#
+# Install as /etc/systemd/system/persistbot@.service, then enable the timer,
+# not this unit.
+
+[Unit]
+Description=Persist Bot tick (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# An unprivileged account that owns /opt/persistbot. This account is the
+# security boundary; the command allowlist is only a guardrail.
+User=persistbot
+Group=persistbot
+WorkingDirectory=/opt/persistbot
+ExecStart=/opt/persistbot/.venv/bin/python /opt/persistbot/bot.py conf/%i.yaml
+# 75: the model server was unreachable or busy; the goal waits for a later
+# tick. 1: an attempt ended without finishing; the goal is still open.
+# Neither is a fault of this unit. Exit 2 (configuration) still fails it.
+SuccessExitStatus=75 1
+# A backstop only. A tick is bounded by max_turns times the model timeout
+# plus tool time: 12 turns, each a 300 s model call and at most four 60 s
+# commands, is 108 minutes with the defaults. A tick killed here is recorded as a crashed attempt, so
+# keep this above that worst case if you raise either limit.
+TimeoutStartSec=2h
+NoNewPrivileges=yes
+ProtectSystem=full

@@ -202,16 +202,19 @@ class Store:
             (*OPEN_STATES, self.clock()),
         ).fetchone()
 
-    def update_goal(self, goal_id: int, **fields) -> None:
+    def _goal_update(self, goal_id: int, fields: dict) -> tuple[str, tuple]:
         allowed = {"state", "failures", "deferrals", "not_before", "summary"}
         bad = set(fields) - allowed
         if bad:
             raise ValueError(f"cannot update goal field(s): {', '.join(sorted(bad))}")
         if "state" in fields and fields["state"] not in GOAL_STATES:
             raise ValueError(f"unknown goal state: {fields['state']}")
-        fields["updated_at"] = self.clock()
+        fields = {**fields, "updated_at": self.clock()}
         sets = ", ".join(f"{name}=?" for name in fields)
-        self._run(f"UPDATE goal SET {sets} WHERE id=?", (*fields.values(), goal_id))
+        return f"UPDATE goal SET {sets} WHERE id=?", (*fields.values(), goal_id)
+
+    def update_goal(self, goal_id: int, **fields) -> None:
+        self._run(*self._goal_update(goal_id, fields))
 
     # attempts -----------------------------------------------------------
 
@@ -228,6 +231,27 @@ class Store:
             "UPDATE attempt SET ended_at=?, outcome=?, detail=? WHERE id=?",
             (self.clock(), outcome, detail, attempt_id),
         )
+
+    def close_attempt(self, attempt_id: int, outcome: str, detail: str = "", **goal_fields) -> None:
+        """End an attempt and update its goal in one transaction.
+
+        Done separately, a tick killed between the two writes would leave a
+        finished attempt beside a goal that never heard about it: a completed
+        goal still active, or a failure that was never counted.
+        """
+        if outcome not in OUTCOMES:
+            raise ValueError(f"unknown attempt outcome: {outcome}")
+        row = self.db.execute("SELECT goal_id FROM attempt WHERE id=?", (attempt_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"no attempt {attempt_id}")
+        goal_sql = self._goal_update(row["goal_id"], goal_fields) if goal_fields else None
+        with self.db:  # commits both, or neither
+            self.db.execute(
+                "UPDATE attempt SET ended_at=?, outcome=?, detail=? WHERE id=?",
+                (self.clock(), outcome, detail, attempt_id),
+            )
+            if goal_sql:
+                self.db.execute(*goal_sql)
 
     def open_attempts(self) -> list[sqlite3.Row]:
         """Attempts with a start and no end: left behind by a tick that died."""

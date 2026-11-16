@@ -1,0 +1,17 @@
+# Wakes one bot every five minutes. A tick with nothing to do exits at once,
+# and a tick that finds another still running exits without touching state.
+#
+# Install as /etc/systemd/system/persistbot@.timer, then:
+#   systemctl enable --now persistbot@raven.timer
+
+[Unit]
+Description=Persist Bot timer (%i)
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30
+AccuracySec=1s
+Unit=persistbot@%i.service
+
+[Install]
+WantedBy=timers.target
