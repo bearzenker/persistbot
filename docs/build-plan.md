@@ -18,6 +18,8 @@ something that is only in the doc, ask the owner and write the answer here.
 Update this table in the same pull request that finishes a phase. Status is
 `not started`, `in progress` or `done`. A phase is finished for the purpose
 of starting the next one only when its row says `done` on `origin/main`.
+A row marked `proposed` waits for the owner's decision: do not start it,
+and do not let it hold up the phases after it.
 
 | Phase | Scope | Branch | Status |
 |---|---|---|---|
@@ -26,6 +28,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
 | 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | done |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `claude/youthful-pasteur-jy7xzm` | done |
+| 4a | Privilege separation: tools run as a second account (`docs/privilege-separation.md`) | `phase-4a-privsep` | proposed |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
 | 7 | To Do list | `phase-7-todo` | not started |
@@ -42,18 +45,25 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 to 4 are done. Phase 4 (the MVP) is finished on
-  `claude/youthful-pasteur-jy7xzm` and waits for the owner to merge its
-  pull request. No phase is in progress.
-- **Next:** phase 5 (phone a friend), once phase 4 is on `main`. Read
-  "Core model", `docs/persona-pattern.md` and the phase 4 "As built" notes
-  first. The stuck state and the failure counter it escalates from are in
-  `tick._count_failure`.
-- **Waiting on the owner:** merge of phase 4; then one real goal on a VM
+- **State:** phases 0 to 4 are done and on `main` (phase 4 merged as pull
+  request 11). No phase is in progress.
+- **Proposed, not decided:** phase 4a, privilege separation. The MVP showed
+  that a tool call can rewrite the harness's code, config and state,
+  because both run as one account in one directory. The evaluation and the
+  design are in `docs/privilege-separation.md`; its last section lists the
+  owner's decisions with defaults. If the owner accepts it, set the row to
+  `not started`, move the decisions into "Owner decisions", and build it
+  before phase 5.
+- **Next:** phase 5 (phone a friend), unless the owner has accepted 4a.
+  Read "Core model", `docs/persona-pattern.md` and the phase 4 "As built"
+  notes first. The stuck state and the failure counter it escalates from
+  are in `tick._fail`.
+- **Waiting on the owner:** the decision on phase 4a; one real goal on a VM
   against the LAN model through the systemd timer, and the tag `v0.1.0`.
-  Build sessions cannot do either. Issues 7 (keys file readable) and 8
-  (`find -exec`) are backlog by the owner's decision; do not fix them
-  unasked.
+  Build sessions cannot do the last two. Issues 7 (keys file readable) and
+  8 (`find -exec`) are backlog by the owner's decision; do not fix them
+  unasked. Phase 4a would close 7. Issue 12 (where processed prompt files
+  go) is open and not scheduled.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
@@ -670,6 +680,11 @@ named.
    failures, then the goal waits for an operator until phase 5 exists.
 7. **Model eval** (phase 3). Needs a LAN model the build sessions cannot
    reach. Default: the script ships and the operator runs it.
+8. **Privilege separation** (phase 4a). Raised by the owner 2026-11-16:
+   the bot can change its own configuration and code. Default until the
+   owner answers: phase 4a is not built, and the two-step stopgap under
+   "What can be done today" in `docs/privilege-separation.md` is the
+   operator's to apply on any install.
 
 ## Owner decisions
 
