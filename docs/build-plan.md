@@ -25,7 +25,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 | 1 | Skeleton: package, config, logging, state store, lock | `claude/persistbot-mvp-plan-5bdmdy` | done |
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
 | 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | done |
-| 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `phase-4-tick` | not started |
+| 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `claude/youthful-pasteur-jy7xzm` | in progress |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
 | 7 | To Do list | `phase-7-todo` | not started |
@@ -42,17 +42,17 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 to 3 are merged. No phase is in progress. Issue 9
-  (pipes and redirection in `run_shell`) is finished on
-  `claude/youthful-pasteur-jy7xzm` and waits for the owner to merge its
-  pull request.
-- **Next:** phase 4 (tick loop, the MVP), once the issue 9 pull request is
-  on `main`. Read "Core model" and the phase 2 and 3 "As built" notes
-  first. The loop calls `tools.schemas()` and `tools.call(ctx, name,
+- **State:** phases 0 to 3 and issue 9 (pipes in `run_shell`) are merged.
+  Phase 4 (tick loop, the MVP) is in progress on
+  `claude/youthful-pasteur-jy7xzm`.
+- **Finished in phase 4:** nothing yet.
+- **Next:** `src/persistbot/tick.py` (the seven steps in the phase 4
+  section), `system.txt`, the fault-injection tests, then `deploy/` and
+  `README.md`. The loop calls `tools.schemas()` and `tools.call(ctx, name,
   arguments)`; tests that need a model use the `fakellm` fixture.
-- **Waiting on the owner:** merge of the issue 9 pull request. Issues 7
-  (keys file readable) and 8 (`find -exec`) are backlog by the owner's
-  decision; do not fix them unasked.
+- **Waiting on the owner:** nothing. Issues 7 (keys file readable) and 8
+  (`find -exec`) are backlog by the owner's decision; do not fix them
+  unasked.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
