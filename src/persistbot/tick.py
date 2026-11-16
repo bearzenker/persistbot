@@ -89,30 +89,39 @@ def _queue(db: store.Store, text: str, source: str) -> None:
 # failure accounting ------------------------------------------------------
 
 
-def _count_failure(config: BotConfig, db: store.Store, goal_id: int, attempt_id: int,
-                   kind: str, detail: str) -> None:
-    goal = db.goal(goal_id)
+def _fail(config: BotConfig, db: store.Store, goal: sqlite3.Row, attempt_id: int,
+          kind: str, detail: str) -> None:
+    """Close an attempt as a counted failure. The goal is stuck at the limit."""
     failures = goal["failures"] + 1
     limit = config.limits.max_failures
-    if failures >= limit:
-        db.update_goal(goal_id, failures=failures, deferrals=0, state=store.STUCK)
+    stuck = failures >= limit
+    fields = {"failures": failures, "deferrals": 0}
+    if stuck:
+        fields["state"] = store.STUCK
+    # The attempt's end and the goal's count are one write, so neither a
+    # failure nor the stuck state can be lost between them.
+    db.close_attempt(attempt_id, kind, detail, **fields)
+    if stuck:
         log.report(
-            f"goal {goal_id} is stuck after {failures} failed attempts "
+            f"goal {goal['id']} is stuck after {failures} failed attempts "
             f"(last: {kind}, {detail}); it needs an operator"
         )
     else:
-        db.update_goal(goal_id, failures=failures, deferrals=0)
-        log.report(f"goal {goal_id} attempt {attempt_id}: {kind}, {detail} (failure {failures} of {limit})")
+        log.report(
+            f"goal {goal['id']} attempt {attempt_id}: {kind}, {detail} "
+            f"(failure {failures} of {limit})"
+        )
 
 
 def _close_crashed(config: BotConfig, db: store.Store) -> None:
     """An attempt with a start and no end belongs to a tick that died."""
     for attempt in db.open_attempts():
         detail = "the run ended without finishing"
-        db.end_attempt(attempt["id"], store.CRASHED, detail)
         goal = db.goal(attempt["goal_id"])
         if goal is not None and goal["state"] in store.OPEN_STATES:
-            _count_failure(config, db, goal["id"], attempt["id"], store.CRASHED, detail)
+            _fail(config, db, goal, attempt["id"], store.CRASHED, detail)
+        else:
+            db.end_attempt(attempt["id"], store.CRASHED, detail)
 
 
 # prompt ------------------------------------------------------------------
@@ -233,10 +242,11 @@ def _attempt(config: BotConfig, model: ResolvedModel, db: store.Store,
 
 def _record(config: BotConfig, db: store.Store, goal: sqlite3.Row, attempt_id: int,
             outcome: Outcome) -> int:
+    """Write the attempt's end and what it means for the goal, as one write."""
     goal_id = goal["id"]
-    db.end_attempt(attempt_id, outcome.kind, outcome.detail)
     if outcome.kind == store.COMPLETED:
-        db.update_goal(goal_id, state=store.DONE, summary=outcome.detail, deferrals=0)
+        db.close_attempt(attempt_id, outcome.kind, outcome.detail,
+                         state=store.DONE, summary=outcome.detail, deferrals=0)
         log.report(f"goal {goal_id} done: {_clip(outcome.detail, 300)}")
         return EXIT_OK
     if outcome.kind == store.DEFERRED:
@@ -248,14 +258,15 @@ def _record(config: BotConfig, db: store.Store, goal: sqlite3.Row, attempt_id: i
             wait = outcome.retry_after
         else:
             wait = min(BACKOFF_FIRST * 2 ** (deferrals - 1), BACKOFF_CAP)
-        db.update_goal(goal_id, deferrals=deferrals, not_before=db.clock() + wait)
+        db.close_attempt(attempt_id, outcome.kind, outcome.detail,
+                         deferrals=deferrals, not_before=db.clock() + wait)
         line = f"goal {goal_id} deferred for {wait:.0f}s: {_clip(outcome.detail, 300)}"
         if outcome.fatal:
             log.report(line + " (will not fix itself: check the key, model and provider)")
         else:
             log.action(line, "warning")
         return EXIT_TEMPFAIL
-    _count_failure(config, db, goal_id, attempt_id, outcome.kind, outcome.detail)
+    _fail(config, db, goal, attempt_id, outcome.kind, outcome.detail)
     return EXIT_FAILED
 
 

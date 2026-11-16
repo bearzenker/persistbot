@@ -538,6 +538,10 @@ As built:
   upstream error (401, 404 and the like) waits 3,600 seconds and writes a
   report line. Any attempt that is not a deferral resets the deferral
   count. Failures are never reset in the MVP.
+- An attempt's end and its effect on the goal (done, failure count,
+  stuck, `not_before`) are one transaction, `Store.close_attempt`. A tick
+  killed at that point leaves either both or neither, and "neither" is an
+  open attempt the next tick closes as `crashed`.
 - Report lines: goal done, each counted failure with its number, goal
   stuck, and a fatal upstream deferral. An ordinary deferral goes to the
   action log only.
