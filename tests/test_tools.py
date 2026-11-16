@@ -5,24 +5,7 @@ import time
 import pytest
 
 from persistbot import memory, runner, tools
-from persistbot.link import Link
-from persistbot.store import Store
 from persistbot.tools import files, shell, state
-
-
-@pytest.fixture
-def ctx(tmp_path):
-    """Tools wired to a real runner process. The harness's state is in
-    `raven/`; the model's working directory is `raven/work/`."""
-    base = tmp_path / "raven"
-    base.mkdir()
-    link = Link(work=base / "work")
-    link.open()
-    with Store(base / "state.db") as db:
-        goal_id, _ = db.add_goal("fix the thing", "cli")
-        attempt_id = db.start_attempt(goal_id)
-        yield tools.Context(db=db, link=link, goal_id=goal_id, attempt_id=attempt_id, shell_timeout=5)
-    link.close()
 
 
 @pytest.fixture

@@ -460,25 +460,29 @@ def serve(read_fd: int, write_fd: int) -> None:
     if stat.S_ISSOCK(os.fstat(read_fd).st_mode):
         watch = socket.socket(fileno=os.dup(read_fd))
     runner = Runner(watch)
-    with os.fdopen(read_fd, "rb") as requests, os.fdopen(write_fd, "wb") as replies:
-        while True:
+    requests = os.fdopen(read_fd, "rb", closefd=False)
+    while True:
+        try:
             line = requests.readline(MAX_LINE + 1)
-            if not line:
-                return
-            if len(line) > MAX_LINE or not line.endswith(b"\n"):
-                reply = _fail("error: the request is too long or was cut off")
-            else:
-                try:
-                    reply = runner.handle(json.loads(line))
-                except ValueError:
-                    reply = _fail("error: the request is not valid JSON")
+        except OSError:
+            return
+        if not line:
+            return
+        if len(line) > MAX_LINE or not line.endswith(b"\n"):
+            reply = _fail("error: the request is too long or was cut off")
+        else:
             try:
-                replies.write(json.dumps(reply).encode("ascii") + b"\n")
-                replies.flush()
-            except OSError:
-                return  # the caller has gone
-            if len(line) > MAX_LINE:
-                return  # the rest of an overlong line cannot be told from a request
+                reply = runner.handle(json.loads(line))
+            except ValueError:
+                reply = _fail("error: the request is not valid JSON")
+        try:
+            data = memoryview(json.dumps(reply).encode("ascii") + b"\n")
+            while data:
+                data = data[os.write(write_fd, data):]
+        except OSError:
+            return  # the caller has gone
+        if len(line) > MAX_LINE:
+            return  # the rest of an overlong line cannot be told from a request
 
 
 def main() -> int:

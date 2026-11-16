@@ -75,8 +75,11 @@ class Link:
         if config.user is None:
             return cls(work=config.work)
         package = Path(runner.__file__).resolve().parent
-        write = [config.venv, config.path.parent, config.path, package, Path(sys.prefix),
-                 config.base, config.logging.dir, config.reporting.dir, config.incoming]
+        # Everything the harness runs or reads: its install, its configuration,
+        # its state, and every directory Python loads its code from.
+        code = [Path(entry) for entry in sys.path if entry and Path(entry).is_dir()]
+        write = [config.venv, config.path.parent, config.path, config.base, config.logging.dir,
+                 config.reporting.dir, config.incoming, package, *code]
         read = [config.path.parent / "keys.json", config.base, config.db_path,
                 config.logging.dir, config.reporting.dir, config.incoming]
         return cls(
@@ -128,17 +131,7 @@ class Link:
         self._adopt(ours)
 
     def _connect(self) -> None:
-        try:
-            expected = pwd.getpwnam(self.user).pw_uid
-        except KeyError:
-            raise Refused(f"there is no Linux account named '{self.user}' (bot.user)") from None
-        if expected == 0:
-            raise Refused("bot.user is root; the tools must run as an unprivileged account")
-        if expected == os.geteuid():
-            raise Refused(
-                f"bot.user '{self.user}' is the account the harness itself runs as; "
-                "the tools need an account of their own"
-            )
+        expected = _account(self.user)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.settimeout(CONNECT_WAIT)
         try:
@@ -279,6 +272,22 @@ class Link:
                 self._child.kill()
                 self._child.wait()
             self._child = None
+
+
+def _account(user: str) -> int:
+    """The uid the runner must have. It may be neither root nor our own."""
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+    except KeyError:
+        raise Refused(f"there is no Linux account named '{user}' (bot.user)") from None
+    if uid == 0:
+        raise Refused("bot.user is root; the tools must run as an unprivileged account")
+    if uid == os.geteuid():
+        raise Refused(
+            f"bot.user '{user}' is the account the harness itself runs as; "
+            "the tools need an account of their own"
+        )
+    return uid
 
 
 def _names(paths: list) -> str:

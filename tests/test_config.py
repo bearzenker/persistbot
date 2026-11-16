@@ -116,3 +116,42 @@ def test_shipped_init_yaml_loads():
     cfg = load(Path(__file__).parent.parent / "conf" / "init.yaml")
     assert cfg.name == "Raven"
     assert str(cfg.base) == "/opt/persistbot/raven"
+
+
+# the tools account and the working directory ------------------------------
+
+
+def test_work_is_beside_the_state_when_there_is_no_user(make_conf, tmp_path):
+    cfg = load(make_conf())
+    assert cfg.user is None and cfg.runner is None
+    assert cfg.work == tmp_path / "opt" / "raven" / "work"
+
+
+def test_user_puts_work_beside_the_install_and_names_the_socket(make_conf, tmp_path):
+    cfg = load(make_conf("user: raven\n"))
+    assert cfg.user == "raven"
+    assert cfg.work == tmp_path / "bot-raven"  # /opt/bot-raven for an install in /opt/persistbot
+    assert str(cfg.runner) == "/run/persistbot/raven.sock"
+    assert cfg.base == tmp_path / "opt" / "raven"  # state stays where it was
+
+
+def test_work_and_runner_can_be_set(make_conf, tmp_path):
+    cfg = load(make_conf("user: raven\nwork: /srv/raven\nrunner: /run/elsewhere.sock\n"))
+    assert str(cfg.work) == "/srv/raven" and str(cfg.runner) == "/run/elsewhere.sock"
+    assert load(make_conf("work: scratch\n")).work == tmp_path / "opt" / "scratch"
+
+
+@pytest.mark.parametrize(
+    "body, message",
+    [
+        ("runner: /run/x.sock", "bot.runner needs bot.user"),
+        ("user: Raven", "not a Linux account name"),
+        ("user: 'ra ven'", "not a Linux account name"),
+        ("user: ''", "non-empty"),
+        ("user: raven\nwork: raven/work", "inside bot.base"),
+        ("user: raven\nwork: raven", "inside bot.base"),
+    ],
+)
+def test_rejects_bad_separation_settings(make_conf, body, message):
+    with pytest.raises(ConfigError, match=message):
+        load(make_conf(body))

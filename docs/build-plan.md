@@ -50,18 +50,22 @@ end without warning, so it must be true at every pushed commit.
   The owner approved it on 2026-11-16; the answers are under "Owner
   decisions". The design is `docs/privilege-separation.md`; the
   deliverables and acceptance list are under "Phase 4a" below.
-- **Finished so far in 4a:** `runner.py` (standalone, standard library
-  only) runs pipelines and file reads and writes; `link.py` starts it as a
-  child process, or connects to its socket, and checks the sender's
-  account on every reply; `tools/shell.py` and `tools/files.py` are thin
-  clients; `tick.py` opens the link before the attempt starts; config
-  keys `user`, `work`, `runner`. The model's working directory is
-  `<base>/work` without `user`, `/opt/bot-<user>` with it. All tests pass
-  through the child-process runner.
-- **Next in 4a:** tests for the link itself (wrong account, reachable
-  paths, runner killed, unreachable, oversize and late replies) and for
-  the new config keys; `status` output; the units in `deploy/`; README;
-  a real two-account check as root in a cloud session; then "As built".
+- **Finished so far in 4a:** all the code and its tests. `runner.py`,
+  `link.py`, the tools as thin clients, the tick opening the link before
+  an attempt, config keys `user`, `work`, `runner`, the separation line in
+  `status`. Tests cover the wrong account, reachable paths, a killed
+  runner, an unreachable runner at the start and in the middle of an
+  attempt, and oversize, late and malformed replies; one test uses real
+  separate accounts and runs only as root. Checked by hand in a cloud
+  session on a real two-account install under `/opt`. `cut`, `df`, `du`
+  and `netstat` are on the allowlist.
+- **Next in 4a:** the units in `deploy/` (harness unit hardened,
+  `persistbot-runner@.socket` and `.service`), verified with
+  `systemd-analyze verify`; README install for two accounts; `conf/init.yaml`
+  comment for `user`; CLAUDE.md rules; "As built" under phase 4a;
+  `docs/privilege-separation.md` brought in line with what was built (the
+  identity check uses the sender's credentials on each reply, not
+  `SO_PEERCRED`, which under socket activation names systemd).
 - **After 4a:** phase 5 (phone a friend). Read "Core model",
   `docs/persona-pattern.md` and the phase 4 "As built" notes first. The
   stuck state and the failure counter it escalates from are in

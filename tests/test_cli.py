@@ -166,3 +166,12 @@ def test_status_reports_the_resolved_model_or_why_not(make_conf, tmp_path, capsy
     (tmp_path / "provider.json").unlink()
     assert main([str(conf), "status"]) == EXIT_OK  # status still works for the operator
     assert "persona does not resolve" in capsys.readouterr().out
+
+
+def test_status_says_whether_the_tools_are_separated(make_conf, tmp_path, capsys):
+    assert main([str(make_conf()), "status"]) == EXIT_OK
+    out = capsys.readouterr().out
+    assert "tools not separated" in out and "no bot.user" in out
+    assert not base(tmp_path).exists()  # still creates nothing, not even the work directory
+    assert main([str(make_conf("user: persistbot-no-such-account\n")), "status"]) == EXIT_OK
+    assert "tools cannot run: there is no Linux account named" in capsys.readouterr().out
