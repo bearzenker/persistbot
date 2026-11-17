@@ -154,7 +154,11 @@ one name for both.
 
 With `user: raven` the model's working directory is `/opt/bot-raven`, a
 directory named `bot-<user>` beside the install directory. `work:` sets a
-different one. It may not be inside `base`. The shipped `conf/init.yaml`
+different one. It may not be inside `base` or the install directory. If
+you set it, also change `ReadWritePaths=` in
+`persistbot-runner@.service` to the same path: that unit makes everything
+else read-only to the tools, and `status` will say the working directory
+cannot be written until the two agree. The shipped `conf/init.yaml`
 leaves `user` out so that it runs anywhere; set it on a real install.
 
 The model's instructions are `system.txt` in the install directory. A bot

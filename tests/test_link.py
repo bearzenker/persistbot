@@ -495,6 +495,28 @@ def test_for_config_lists_what_the_tools_account_must_not_reach(make_conf, tmp_p
     assert not plain.separated and plain.deny_write == [] and plain.work == venv / "raven" / "work"
 
 
+def test_an_instance_prompt_outside_the_base_is_protected_too(make_conf, tmp_path):
+    from persistbot.config import load
+
+    config = load(make_conf("user: raven\nsystem: /srv/prompts/raven\n"))
+    assert str(config.system) == "/srv/prompts/raven.txt"
+    assert "/srv/prompts/raven.txt" in Link.for_config(config).deny_write
+    inside = Link.for_config(load(make_conf("user: raven\n")))
+    assert not any(path.endswith("system.txt") for path in inside.deny_write)  # covered by its directory
+
+
+def test_a_listed_file_that_does_not_exist_yet_is_reported_if_it_could_be_created(install, tmp_path):
+    """The instance prompt is optional: an absent one the account could create is a hole."""
+    assert runner._reachable_for_write([str(tmp_path / "open" / "raven.txt")])[0] == [str(tmp_path / "open")]
+    assert runner._reachable_for_write([str(install / "raven.txt")])[0] == []
+
+
+def test_a_work_directory_that_cannot_be_written_says_what_to_check(tmp_path):
+    (tmp_path / "file").write_text("in the way")
+    reply = runner.Runner().hello({"work": str(tmp_path / "file" / "work")})
+    assert not reply["ok"] and "ReadWritePaths= in persistbot-runner@.service" in reply["text"]
+
+
 # the real thing, when the suite runs as root --------------------------------
 
 

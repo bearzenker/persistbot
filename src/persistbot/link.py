@@ -78,8 +78,10 @@ class Link:
         # Everything the harness runs or reads: its install, its configuration,
         # its state, and every directory Python loads its code from.
         code = [Path(entry) for entry in sys.path if entry and Path(entry).is_dir()]
-        write = [config.venv, config.path.parent, config.path, config.base, config.logging.dir,
-                 config.reporting.dir, config.incoming, package, *code]
+        # `system` is the instance prompt. It is normally inside `base`, but the
+        # config may put it anywhere, and it is read into every prompt.
+        write = [config.venv, config.path.parent, config.path, config.base, config.system,
+                 config.logging.dir, config.reporting.dir, config.incoming, package, *code]
         read = [config.path.parent / "keys.json", config.base, config.db_path,
                 config.logging.dir, config.reporting.dir, config.incoming]
         return cls(

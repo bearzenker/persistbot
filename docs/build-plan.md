@@ -662,7 +662,8 @@ As built:
   in its hello must match as well.
 - The separation check runs in the runner at hello. Not writable: the
   install directory, the conf directory, the bot's YAML, the base, log and
-  incoming directories, and every directory on the harness's `sys.path`,
+  incoming directories, the instance prompt file wherever `system` puts
+  it, and every directory on the harness's `sys.path`,
   each walked to the bottom, up to 250,000 entries. Not readable or
   enterable: `keys.json`, the base directory, `state.db`, the log and
   incoming directories. The first five offenders are named. A symbolic

@@ -24,6 +24,10 @@ TimeoutStopSec=10
 NoNewPrivileges=yes
 # Ownership already keeps the account out of the harness's files. These
 # say it again a second way, so one wrong chmod does not open the door.
+# ReadWritePaths= must be the bot's working directory. If the bot's YAML
+# sets `work:` to something other than /opt/bot-<account>, change it here
+# as well, or the runner will find that directory read-only and the harness
+# will refuse to run tools.
 ProtectSystem=strict
 ReadWritePaths=-/opt/bot-%i
 InaccessiblePaths=-/opt/persistbot/conf -/opt/persistbot/%i

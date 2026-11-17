@@ -51,6 +51,11 @@ ACCEPT_WAIT = 30.0       # seconds a socket-activated runner waits for its calle
 # into a command's output.
 ENV_KEEP = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "TZ")
 
+WORK_HINT = (
+    "Create it for this account, and if it is not /opt/bot-<account>, set ReadWritePaths= "
+    "in persistbot-runner@.service to match"
+)
+
 _UMASK = os.umask(0)
 os.umask(_UMASK)
 
@@ -239,9 +244,10 @@ class Runner:
             work.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             return _fail(f"error: the working directory {work} does not exist and this "
-                         f"account cannot create it: {_why(exc)}")
+                         f"account cannot create it: {_why(exc)}. {WORK_HINT}")
         if not work.is_dir() or not os.access(work, os.R_OK | os.W_OK | os.X_OK):
-            return _fail(f"error: this account cannot write in the working directory {work}")
+            return _fail(f"error: this account cannot write in the working directory {work}. "
+                         f"{WORK_HINT}")
         self.work = work.resolve()
         os.chdir(self.work)
         writable, seen, complete = _reachable_for_write(
