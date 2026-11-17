@@ -2,7 +2,10 @@
 # Relative paths resolve against `venv`.
 bot:
   venv: /opt/persistbot     # install directory, always absolute
-  base: raven               # this bot's directory; holds state.db, logs, incoming
+  base: raven               # the harness's directory for this bot: state.db, logs, incoming
+  # user: raven             # Linux account the tools run as. Set it on a real install:
+                            #   without it the bot can change its own code and config.
+                            #   The model then works in /opt/bot-raven (or set `work:`).
   system: system            # instance system prompt: <base>/system.txt
   name: Raven               # letters, digits, _ and - only
   persona: Bichon           # persona this bot runs as (conf/persona*.json)

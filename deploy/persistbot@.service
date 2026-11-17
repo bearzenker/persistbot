@@ -1,18 +1,22 @@
 # One tick of one bot. The instance name is the bot's config file:
 # persistbot@raven runs /opt/persistbot/conf/raven.yaml.
 #
+# This is the harness. It holds the keys and the bot's state, talks to the
+# model, and runs no command itself: the model's commands and file access
+# go to persistbot-runner@raven, which runs as the bot's own account.
+#
 # Install as /etc/systemd/system/persistbot@.service, then enable the timer,
 # not this unit.
 
 [Unit]
 Description=Persist Bot tick (%i)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target persistbot-runner@%i.socket
+Wants=network-online.target persistbot-runner@%i.socket
 
 [Service]
 Type=oneshot
-# An unprivileged account that owns /opt/persistbot. This account is the
-# security boundary; the command allowlist is only a guardrail.
+# An unprivileged account. /opt/persistbot belongs to root; this account
+# owns only the bot's base directory, /opt/persistbot/%i.
 User=persistbot
 Group=persistbot
 WorkingDirectory=/opt/persistbot
@@ -27,4 +31,10 @@ SuccessExitStatus=75 1
 # keep this above that worst case if you raise either limit.
 TimeoutStartSec=2h
 NoNewPrivileges=yes
-ProtectSystem=full
+# The whole file system is read-only to the harness except the bot's base
+# directory (state, logs, incoming). If your `base` is elsewhere, change
+# this line to match.
+ProtectSystem=strict
+ReadWritePaths=-/opt/persistbot/%i
+ProtectHome=yes
+PrivateTmp=yes

@@ -200,6 +200,7 @@ class Link:
 
     def _exchange(self, request: dict, wait: float) -> dict:
         deadline = time.monotonic() + wait
+        self._pending = b""  # nothing left over from an earlier call may pass as this reply
         data = json.dumps(request).encode("ascii") + b"\n"
         try:
             while data:

@@ -75,6 +75,47 @@ def _fail(text: str, **extra) -> dict:
     return {"ok": False, "text": text, **extra}
 
 
+def _allowed(path: str, want: int) -> bool:
+    """Whether this account may read (4), write (2) or enter (1) `path`.
+
+    Asks the kernel, and also reads the mode bits: under a read-only mount
+    the kernel says no to a file whose mode says yes, and a mode that has
+    drifted should be reported even while a mount is covering for it.
+    """
+    if os.access(path, {4: os.R_OK, 2: os.W_OK, 1: os.X_OK}[want]):
+        return True
+    try:
+        status = os.stat(path)
+    except OSError:
+        return False
+    if status.st_uid == os.getuid():
+        bits = status.st_mode >> 6
+    elif status.st_gid in (set(os.getgroups()) | {os.getgid()}):
+        bits = status.st_mode >> 3
+    else:
+        bits = status.st_mode
+    return bool(bits & want)
+
+
+def _replaceable(path: str) -> str | None:
+    """The directory above `path`, if any, where this account could swap in
+    a tree of its own: one it can write, unless the sticky bit protects an
+    entry it does not own."""
+    child = os.path.abspath(path)
+    while True:
+        parent = os.path.dirname(child)
+        if parent == child:
+            return None
+        try:
+            above, entry = os.stat(parent), os.lstat(child)
+        except OSError:
+            return None
+        sticky = above.st_mode & stat.S_ISVTX and os.getuid() not in (above.st_uid, entry.st_uid)
+        if _allowed(parent, 2) and not sticky:
+            return parent
+        child = parent
+
+
 def _reachable_for_write(tops: list[str], skip: Path | None) -> tuple[list[str], int, bool]:
     """Paths under `tops` this account can write: (found, looked at, finished)."""
     found: list[str] = []
@@ -85,13 +126,16 @@ def _reachable_for_write(tops: list[str], skip: Path | None) -> tuple[list[str],
         nonlocal seen
         seen += 1
         # A link is judged by what it points at only if that is listed too.
-        if not os.path.islink(path) and os.access(path, os.W_OK):
+        if not os.path.islink(path) and _allowed(path, 2):
             found.append(path)
         return len(found) >= CHECK_REPORT or seen >= CHECK_BUDGET
 
     for top in tops:
         if skip is not None and Path(top) == skip:
             continue
+        above = _replaceable(top)
+        if above is not None and above not in found:
+            found.append(above)
         if check(top):
             return found, seen, len(found) >= CHECK_REPORT
         if not os.path.isdir(top) or os.path.islink(top):
@@ -108,8 +152,7 @@ def _reachable_for_write(tops: list[str], skip: Path | None) -> tuple[list[str],
 def _reachable_for_read(paths: list[str]) -> list[str]:
     found = []
     for path in paths:
-        mode = os.R_OK
-        if os.access(path, mode) or (os.path.isdir(path) and os.access(path, os.X_OK)):
+        if _allowed(path, 4) or (os.path.isdir(path) and _allowed(path, 1)):
             found.append(path)
     return found
 

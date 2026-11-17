@@ -1,15 +1,14 @@
 # Privilege separation: keeping the bot out of its own code and config
 
-Status: **accepted by the owner on 2026-11-16 and being built as phase
-4a.** The owner's answers are in "Owner decisions" in
-`docs/build-plan.md`; where they differ from a default below, they win.
-The one difference is the layout: everything stays under `/opt/persistbot`
-and the working directory is `/opt/bot-<account>`.
+Status: **built as phase 4a.** The owner accepted this on 2026-11-16. What
+was built, and where it differs from the proposal, is under "Phase 4a",
+"As built", in `docs/build-plan.md`. This document keeps the evaluation
+and the reasons.
 
-## The problem as it stands in the tree
+## The problem as it stood before phase 4a
 
-The harness and the model's tool calls run as one Linux account, and that
-account owns `/opt/persistbot`. The plan calls the account "the security
+The harness and the model's tool calls ran as one Linux account, and that
+account owned `/opt/persistbot`. The plan calls the account "the security
 boundary", but the harness sits inside that boundary together with the
 model. Reproduced on 2026-11-16 against a throwaway install, using only the
 six tools and allowlisted commands:
@@ -149,83 +148,66 @@ cloud sessions. B is not built unless the owner asks.
 
 ### Layout
 
-Paths are configuration, so the code does not care, but the recommended
-install is:
+The owner chose to keep the application in one directory:
 
 | Path | Owner, mode | Holds |
 |---|---|---|
 | `/opt/persistbot/` | `root:root` 0755 | code, `.venv`, common `system.txt` |
-| `/etc/persistbot/` | `root:persistbot` 0750 | `<bot>.yaml`, `persona*.json`, `provider.json` |
-| `/etc/persistbot/keys.json` | `root:persistbot` 0640 | keys |
-| `/var/lib/persistbot/<bot>/` | `persistbot:persistbot` 0700 | `state.db`, `bot.lock`, `logs/`, `incoming/`, instance `system.txt` |
-| `/srv/persistbot/<bot>/` | `<bot>:<bot>` 0750 | the model's working directory |
+| `/opt/persistbot/conf/` | `root:persistbot` 0750, files 0640 | `<bot>.yaml`, `persona*.json`, `provider.json`, `keys.json` |
+| `/opt/persistbot/<bot>/` | `persistbot:persistbot` 0700 | the base: `state.db`, `bot.lock`, `logs/`, `incoming/`, instance `system.txt` |
+| `/opt/bot-<account>/` | `<account>:<account>` 0750 | the model's working directory |
 
 - The harness can read its code and config and cannot write them either.
-- `incoming/` gets a group for the scripts that submit work
-  (`persistbot-submit`, mode 0730). Bot accounts are not in it.
-- What `raven` may read on the node is decided the ordinary way, by group
-  membership (`adm`, `systemd-journal`), and in phase 8 by sudo.
+- The bot's account cannot enter the base directory at all, so it cannot
+  read its own queue, logs or state, and cannot queue work for itself.
+  Scripts that submit work run as `persistbot` or root.
+- What the bot's account may read on the node is decided the ordinary
+  way, by group membership (`adm`, `systemd-journal`), and in phase 8 by
+  sudo.
+- Creating the bot's account is the system administrator's job.
 
 Config gains three keys, all optional:
 
 ```yaml
 bot:
   user: raven                          # account the tools must run as
-  work: /srv/persistbot/raven          # default: <base>/work
-  runner: /run/persistbot/raven.sock   # default: local child process
+  work: /opt/bot-raven                 # default with `user`; <base>/work without
+  runner: /run/persistbot/raven.sock   # default with `user`
 ```
 
-`work` defaults to `<base>/work` in every mode, so the model's files and
-the harness's state are never in one directory, even on a developer's
-machine. The `PROTECTED` list in `tools/files.py` then has nothing left to
-guard and goes.
+Without `user` the runner is a child process on the harness's own account
+and `work` is `<base>/work`, so the model's files and the harness's state
+are never in one directory, even on a developer's machine.
 
 ### Fail closed, and prove it every tick
 
-- `user` set: the harness reads the kernel's record of who is on the other
-  end of the socket (`SO_PEERCRED`). If that is not the uid of `user`, or
-  is 0, or is the harness's own uid, no tool runs and the tick exits 2
-  before the goal is touched. There is no fallback to the harness account.
-- On connect the harness sends the runner the paths it must not reach
-  (code, config, keys, state directory). The runner answers, as `raven`,
-  whether it can write each and whether it can read the keys. Any "yes"
-  is exit 2 with a report line naming the path. A later `chmod -R 777`
-  cannot go unnoticed.
-- `user` unset: tools run on the harness account, as now. `status` and
-  the action log say `not separated` in so many words.
+- `user` set: the harness asks the kernel which account each reply was
+  sent by. If that is not the uid of `user`, no tool runs and the tick
+  exits 2 before the goal is touched. `user` may be neither root nor the
+  harness's own account. There is no fallback to the harness account.
 
-### Unit sketch
+  The proposal said `SO_PEERCRED`. That does not work here: it reports who
+  created the listening socket, and under socket activation that is
+  systemd, as root. The harness instead sets `SO_PASSCRED` and reads the
+  sender's credentials that the kernel attaches to the data it receives.
+  An unprivileged sender cannot forge them.
+- On connect the harness sends the runner the paths it must not reach.
+  The runner answers, as the bot's account, whether it can write any of
+  the code, configuration or state, and whether it can read the keys or
+  enter the base directory. Any "yes" is exit 2 with a report line naming
+  the path. A later `chmod -R 777` cannot go unnoticed.
+- `user` unset: tools run on the harness account. `status` and the action
+  log say `not separated` in so many words.
 
-To be checked with `systemd-analyze verify` and on the owner's VM.
+### Units
 
-```ini
-# persistbot@.service  (harness; changes only)
-User=persistbot
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/var/lib/persistbot/%i
-ProtectHome=yes
-PrivateTmp=yes
+The units are in `deploy/`: `persistbot@.service` (harness),
+`persistbot-runner@.socket` and `persistbot-runner@.service` (runner).
+The runner unit's `User=` is the root-owned authority for the account;
+`user:` in the YAML is what the harness expects to find.
 
-# persistbot-runner@.socket
-[Socket]
-ListenStream=/run/persistbot/%i.sock
-SocketUser=persistbot
-SocketMode=0600
-
-# persistbot-runner@.service
-[Service]
-User=%i
-ExecStart=/opt/persistbot/.venv/bin/python -I -m persistbot.runner
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/srv/persistbot/%i
-InaccessiblePaths=/etc/persistbot /var/lib/persistbot
-MemoryMax=256M
-TasksMax=64
-```
-
-The mount rules repeat what ownership already enforces. That is on
+The mount rules in both units (`ProtectSystem=strict`, `ReadWritePaths`,
+`InaccessiblePaths`) repeat what ownership already enforces. That is on
 purpose: two independent mechanisms, so one mistake does not open the
 door.
 
@@ -246,86 +228,44 @@ door.
 - **More deny rules in the allowlist.** The plan already says the list is
   a guardrail. Every rule has a way round it (issue 8).
 
-## What can be done today, with no code
+## An install that is not separated
 
-On any install before this is built, as root:
+A bot with no `user` in its config still runs on one account. Root-owned
+code and a read-only mount protect its code and configuration from
+writes, and nothing else:
 
 1. Make `/opt/persistbot` and everything in it `root:root`, except the
-   bot's base directory, which stays with `persistbot`. Make
-   `conf/keys.json` `root:persistbot` 0640.
-2. In `persistbot@.service` set `ProtectSystem=strict` and
-   `ReadWritePaths=` to the bot's base directory.
+   bot's base directory. Make `conf/keys.json` `root:persistbot` 0640.
+2. Keep `ProtectSystem=strict` and `ReadWritePaths=` as shipped in
+   `persistbot@.service`.
 
-That stops the first two rows of the table at the top. It does not stop
-the other five. It is worth doing before the first VM run, and it remains
-in place underneath the full design.
-
-## Phase 4a, if accepted
-
-Deliverables:
-
-- `runner.py`: protocol, pipeline execution, file read and write, moved
-  from `tools/shell.py` and `tools/files.py`.
-- `tools/shell.py`, `tools/files.py`: parse and check in the harness,
-  send to the runner. `Context` carries the runner connection.
-- Two transports: local child process, Unix socket with the peer check.
-- `config.py`: `user`, `work`, `runner`.
-- The start-up separation check, and `status` output for it.
-- `deploy/`: the harness unit hardened, the two runner units.
-- `README.md`: install rewritten for the layout above; "Known limits"
-  updated. `CLAUDE.md` and the plan's "Shell safety" row updated.
-
-Acceptance, all with the local transport and no root:
-
-- Every existing tool test passes through the runner.
-- The four in-base rows of the table at the top (instance prompt, inbox,
-  report log, database) are each a test: with state outside the work
-  directory, no tool can name those files.
-- The other three rows depend on the second account, which no test can
-  create without root. They are covered by the start-up check tests below
-  and by the VM run.
-- Peer uid wrong, 0, or equal to the harness: exit 2, goal untouched.
-- Runner reports it can write a protected path: exit 2, report line.
-- Runner killed during a call: tool error, next call reconnects.
-- Runner unreachable: attempt `deferred`, failure count unchanged.
-- A reply over the size cap or past the deadline is a tool error.
-
-Done when those pass and the owner has run one goal on the VM with two
-accounts and seen `status` report `separated as raven`.
-
-Out of scope: the install script (phase 8), transport B, Landlock,
-network limits on the runner unit, migrating an existing base directory
-(there is no deployed bot yet).
+The keys, the state, the logs, the inbox and the instance prompt stay
+within the model's reach. Set `user`.
 
 ## Effect on the rest of the plan
 
-- **Order.** Before phase 5, and before the VM run and the `v0.1.0` tag.
-  The layout changes, and it is free to change now and awkward once a bot
-  is deployed. The owner then validates one layout, once.
-- **Issue 7** is closed by this. **Issue 8** stays open but drops to a
-  tidiness matter.
+- **Issue 7** is closed by this on a separated install. **Issue 8** stays
+  open but drops to a tidiness matter: `find -exec` runs as the bot's
+  account.
 - **Phase 5.** Friend calls use keys and stay in the harness. No change.
 - **Phase 8.** The sudo allowlist is granted to the bot account, never to
-  `persistbot`. The shipped unit sets `NoNewPrivileges=yes`, under which
-  sudo cannot work at all; with two units that setting is lifted on the
-  runner only, and the harness keeps it. `<base>/tools/` must be owned by
-  the operator, or automatic approval lets the model approve itself.
+  `persistbot`. The runner unit sets `NoNewPrivileges=yes`, under which
+  sudo cannot work at all; phase 8 lifts it on that unit only, and the
+  harness keeps it. `<base>/tools/` must not be writable by the bot's
+  account, or automatic approval lets the model approve itself.
 - **CLAUDE.md** "nothing may require root before phase 8" still holds at
-  run time. Installing the accounts and units needs root once.
+  run time. Creating the accounts and installing the units needs root
+  once, and is the system administrator's work.
 
-## Decisions for the owner
+## The owner's decisions
 
-Each has the default this proposal assumes.
+Answered 2026-11-16; recorded in full under "Owner decisions" in the plan.
 
-1. **Build it, and when.** Default: yes, as phase 4a, before phase 5 and
-   the tag.
-2. **Mechanism.** Default: A, the systemd socket unit. B (`sudo -u`) is
-   closer to "shells out as raven" and simpler to picture, at the cost of
-   `NoNewPrivileges` on the harness and per-distribution PAM checking.
-3. **Install layout.** Default: `/etc`, `/var/lib` and `/srv` as above.
-   Keeping everything under `/opt/persistbot` with the same owners and
-   modes works equally well.
-4. **May a bot queue work for itself?** Default: no. `incoming/` is closed
-   to bot accounts; phase 7's `defer_todo` is the intended route.
-5. **Network for tool commands.** Default: unchanged. The runner unit can
-   later deny outbound traffic if the owner wants it.
+1. **Build it, and when.** Yes, as phase 4a, before phase 5.
+2. **Mechanism.** A, the systemd socket unit.
+3. **Install layout.** Everything under `/opt/persistbot`; the working
+   directory is `/opt/bot-<account>`. Not the `/etc`, `/var/lib`, `/srv`
+   split this proposal defaulted to.
+4. **May a bot queue work for itself?** No. It has no access to its queue,
+   logs or state.
+5. **Network for tool commands.** Not asked for; unchanged.

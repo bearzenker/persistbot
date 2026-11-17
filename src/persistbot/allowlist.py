@@ -30,7 +30,7 @@ COMMANDS = (
     "which", "zcat", "zgrep", "zip",
     # Added after the design doc's list: read-only commands a model was seen
     # to reach for and be refused. The owner allows such additions.
-    "cut", "df", "du", "netstat",
+    "cut", "df", "du", "netstat", "wc",
 )
 # `*` is any run of name characters, `?` exactly one: lsblk, gzip, gunzip.
 WILDCARDS = ("ls*", "?zip", "?unzip")

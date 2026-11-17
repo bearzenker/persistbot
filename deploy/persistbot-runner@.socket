@@ -1,0 +1,19 @@
+# The door between the harness and one bot's tool runner. The instance name
+# is the bot's Linux account: persistbot-runner@raven.socket starts
+# persistbot-runner@raven.service as the account `raven`.
+#
+# Only the harness account may connect. Install as
+# /etc/systemd/system/persistbot-runner@.socket, then:
+#   systemctl enable --now persistbot-runner@raven.socket
+
+[Unit]
+Description=Persist Bot tool runner socket (%i)
+
+[Socket]
+ListenStream=/run/persistbot/%i.sock
+SocketUser=persistbot
+SocketGroup=persistbot
+SocketMode=0600
+
+[Install]
+WantedBy=sockets.target

@@ -45,7 +45,9 @@ A session can end without warning, so unpushed work is lost work.
    not started. Work one phase per session and per pull request. A change
    to the plan or these instructions alone may have its own pull request.
 2. Read the "Core model" section of the plan before any phase from 3
-   onward, and `docs/persona-pattern.md` before phase 2 or 5.
+   onward, `docs/persona-pattern.md` before phase 2 or 5, and
+   `docs/privilege-separation.md` before changing a tool, `link.py` or
+   `runner.py`.
 3. Branch from the current `main`. Do not start a phase before the previous
    one has merged; if it has not, say so and stop.
 4. Build the phase's deliverables, then its acceptance tests. A phase is
@@ -68,12 +70,29 @@ A session can end without warning, so unpushed work is lost work.
 - At most six tool schemas per request; one or two lines of description
   each. The target model is about 3B parameters.
 - All logging goes through `persistbot.log`. No direct `logging` or `print`
-  calls elsewhere.
+  calls elsewhere. The runner keeps no log at all: it cannot reach the log
+  directory, and says what it has to say in its replies.
+- Only `runner.py` runs a command or touches a file for the model, and the
+  harness reaches it only through `link.py`. A tool that needs a process or
+  the file system sends a request to the runner; it never does the work in
+  the harness. The allowlist and every other policy stay in the harness.
+- `runner.py` is standalone: standard library only, nothing imported from
+  the package, started with `python -I`.
+- With `bot.user` set, the harness never runs a tool on its own account.
+  If the runner is unreachable, is the wrong account, or can reach the
+  harness's files, no tool runs.
+- The harness's files (state, logs, incoming, instance prompt) are never
+  in the model's working directory.
 - No test may need a real model or the network. Use `tests/fakellm.py`.
 - Live `conf/keys.json`, `conf/provider.json` and `conf/persona*.json` are
   never committed. The repo carries examples only, in `conf/examples/`.
-- The harness runs as an unprivileged user. Nothing may require root before
-  phase 8, and then only through the sudo allowlist.
+- The harness and the runner each run as an unprivileged user. Nothing may
+  require root before phase 8, and then only through the sudo allowlist,
+  granted to the bot's account and never to the harness's. Creating the
+  accounts and installing the units is the system administrator's work.
+- A read-only command the model is seen to be refused in a live run may be
+  added to the allowlist without asking. Record it in the plan. A command
+  that runs other commands (`xargs`, `env`, a shell) is never one of these.
 
 ## Cloud build sessions
 
@@ -105,6 +124,12 @@ python bot.py conf/cloud.yaml status
   `python -m pytest`.
 - If the variables are absent, skip all of this. Every phase can be built
   and tested without them.
+- `conf/cloud.yaml` has no `user`, so a cloud run is not separated: tools
+  run on the session's own account. One test in `tests/test_link.py` uses
+  real separate accounts and runs only when the suite runs as root, which
+  a cloud session does. A full two-account install can be made under
+  `/opt` in a session by following the README; systemd is not running
+  there, so something else has to listen on the runner's socket.
 
 ## Commands
 

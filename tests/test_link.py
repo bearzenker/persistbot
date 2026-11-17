@@ -310,8 +310,39 @@ def test_the_check_says_when_it_ran_out_of_budget(tmp_path, monkeypatch):
     for number in range(20):
         (install / f"f{number}").symlink_to("/nonexistent")  # links are looked at, never reported
     monkeypatch.setattr(runner, "CHECK_BUDGET", 10)
-    reply = runner.Runner().hello({"work": str(tmp_path / "work"), "deny_write": [str(install / "f0"), str(install)][1:]})
-    assert reply["checked"] <= 10 + runner.CHECK_REPORT
+    reply = runner.Runner().hello({"work": str(tmp_path / "work"), "deny_write": [str(install)]})
+    assert reply["checked"] == 10 and not reply["complete"]
+
+
+def test_mode_bits_count_even_where_the_kernel_says_no(tmp_path, monkeypatch):
+    """Under a read-only mount access() refuses a file whose mode allows it."""
+    target = tmp_path / "code.py"
+    target.write_text("x")
+    target.chmod(0o666)
+    monkeypatch.setattr(runner.os, "access", lambda path, mode: False)
+    monkeypatch.setattr(runner.os, "getuid", lambda: 54321)
+    monkeypatch.setattr(runner.os, "getgid", lambda: 54321)
+    monkeypatch.setattr(runner.os, "getgroups", lambda: [])
+    assert runner._allowed(str(target), 2) and runner._allowed(str(target), 4)
+    target.chmod(0o640)
+    assert not runner._allowed(str(target), 2) and not runner._allowed(str(target), 4)
+    monkeypatch.setattr(runner.os, "getgroups", lambda: [target.stat().st_gid])
+    assert runner._allowed(str(target), 4) and not runner._allowed(str(target), 2)
+
+
+def test_a_writable_directory_above_the_install_is_reported(tmp_path, monkeypatch):
+    install = tmp_path / "loose" / "install"
+    install.mkdir(parents=True)
+    monkeypatch.setattr(runner.os, "access", lambda path, mode: False)
+    monkeypatch.setattr(runner.os, "getuid", lambda: 54321)
+    monkeypatch.setattr(runner.os, "getgid", lambda: 54321)
+    monkeypatch.setattr(runner.os, "getgroups", lambda: [])
+    for mode in (0o755, 0o1777):  # closed, or open but sticky: entries cannot be swapped
+        (tmp_path / "loose").chmod(mode)
+        assert runner._replaceable(str(install)) is None
+    (tmp_path / "loose").chmod(0o777)
+    assert runner._replaceable(str(install)) == str(tmp_path / "loose")
+    (tmp_path / "loose").chmod(0o755)
 
 
 def test_for_config_lists_what_the_tools_account_must_not_reach(make_conf, tmp_path):
@@ -388,8 +419,20 @@ def test_a_runner_on_another_account_cannot_touch_the_harness(as_raven):
         finally:
             served.stop()
 
-        # The runner started as the wrong account (here: root itself).
+        # A file whose mode has drifted is reported even where it cannot be
+        # written at this moment, and so is a directory above the install
+        # that the account could rename things in.
         os.chmod(install / "allowlist.py", 0o644)
+        os.chmod(top, 0o777)
+        served = Activated(top, uid=bot_uid, program=program)
+        try:
+            with pytest.raises(Refused, match=f"can write {top}[,;]"):
+                Link(work=work, user="raven", socket_path=served.path, **deny).open()
+        finally:
+            served.stop()
+            os.chmod(top, 0o755)
+
+        # The runner started as the wrong account (here: root itself).
         served = Activated(top, program=program)
         try:
             with pytest.raises(Refused, match="came from uid 0, not from 'raven'"):

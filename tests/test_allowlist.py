@@ -25,7 +25,7 @@ def test_every_listed_command_is_allowed(name):
 
 
 def test_the_list_is_the_design_docs_plus_the_owners_additions():
-    added = ("cut", "df", "du", "netstat")  # read-only; seen refused in live runs
+    added = ("cut", "df", "du", "netstat", "wc")  # read-only; seen refused in live runs
     assert len(allowlist.COMMANDS) == 33 + len(added)
     assert allowlist.COMMANDS[-len(added):] == added
     assert allowlist.WILDCARDS == ("ls*", "?zip", "?unzip")
