@@ -6,7 +6,7 @@ import time
 import pytest
 
 import fakellm as fake
-from persistbot import EXIT_CONFIG, EXIT_FAILED, EXIT_OK, EXIT_TEMPFAIL, store, tick, tools
+from persistbot import EXIT_CONFIG, EXIT_FAILED, EXIT_OK, EXIT_TEMPFAIL, link, store, tick, tools
 from persistbot.cli import main
 
 GOAL = "Create hello.txt containing hello."
@@ -16,6 +16,7 @@ class Bot:
     def __init__(self, conf, tmp_path, llm):
         self.conf, self.llm = conf, llm
         self.base = tmp_path / "opt" / "raven"
+        self.work = self.base / "work"
         self.venv = tmp_path / "opt"
 
     def tick(self, *words):
@@ -69,7 +70,7 @@ def happy_path():
 def test_a_goal_runs_to_goal_done(bot):
     bot.llm.add(*happy_path())
     assert bot.tick(GOAL) == EXIT_OK
-    assert (bot.base / "hello.txt").read_text() == "hello\n"
+    assert (bot.work / "hello.txt").read_text() == "hello\n"
     goal = bot.goal()
     assert goal["state"] == "done" and goal["summary"] == "wrote hello.txt and read it back"
     (attempt,) = bot.attempts()
@@ -148,7 +149,7 @@ def test_at_most_four_tool_calls_run_from_one_reply(bot):
     many = [("write_file", {"path": f"f{n}.txt", "content": "x"}) for n in range(6)]
     bot.llm.add(fake.tool_calls(many), call("goal_done", summary="wrote what was allowed"))
     assert bot.tick(GOAL) == EXIT_OK
-    assert sorted(p.name for p in bot.base.glob("f*.txt")) == ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]
+    assert sorted(p.name for p in bot.work.glob("f*.txt")) == ["f0.txt", "f1.txt", "f2.txt", "f3.txt"]
     with bot.db() as db:
         assert len(db.tool_calls(1)) == 5  # four writes and goal_done
     answers = [m for m in bot.sent(-1) if m["role"] == "tool"]
@@ -160,7 +161,7 @@ def test_nothing_runs_after_goal_done_in_the_same_reply(bot):
     bot.llm.add(fake.tool_calls([("goal_done", {"summary": "finished"}),
                                  ("write_file", {"path": "late.txt", "content": "x"})]))
     assert bot.tick(GOAL) == EXIT_OK
-    assert bot.goal()["state"] == "done" and not (bot.base / "late.txt").exists()
+    assert bot.goal()["state"] == "done" and not (bot.work / "late.txt").exists()
 
 
 # upstream errors: deferral, never failure --------------------------------
@@ -237,6 +238,63 @@ def test_a_fatal_upstream_error_defers_long_and_reports_without_burning_the_goal
     assert goal["not_before"] - time.time() > 3500
     report = bot.log("report.log")
     assert "goal 1 deferred" in report and "bad key" in report and "check the key" in report
+
+
+# the runner ---------------------------------------------------------------
+
+
+def test_a_runner_that_is_not_the_right_account_costs_the_goal_nothing(make_conf, tmp_path, fakellm):
+    conf = make_conf("user: persistbot-no-such-account\n", url=fakellm.url)
+    bot = Bot(conf, tmp_path, fakellm)
+    bot.llm.add(*happy_path())
+    assert bot.tick(GOAL) == EXIT_CONFIG
+    assert bot.goal()["state"] == "queued" and bot.attempts() == []
+    assert bot.llm.requests == []  # the model is not even asked
+    assert "tools cannot run, so goal 1 was not attempted" in bot.log("report.log")
+    assert "no Linux account named" in bot.log("report.log")
+
+
+def test_a_runner_that_cannot_be_reached_costs_the_goal_nothing(make_conf, tmp_path, fakellm, monkeypatch):
+    monkeypatch.setattr(link, "_account", lambda user: 54321)
+    conf = make_conf(f"user: raven\nrunner: {tmp_path}/nobody.sock\n", url=fakellm.url)
+    bot = Bot(conf, tmp_path, fakellm)
+    assert bot.tick(GOAL) == EXIT_CONFIG
+    assert bot.goal()["state"] == "queued" and bot.attempts() == []
+    assert "cannot reach the runner" in bot.log("report.log")
+    assert not (tmp_path / "bot-raven").exists()  # and nothing ran on our own account instead
+
+
+def test_a_runner_lost_for_good_mid_attempt_defers_without_a_failure(bot, monkeypatch):
+    real = link.Link.call
+    calls = []
+
+    def call_then_vanish(self, request, wait):
+        calls.append(request["op"])
+        if len(calls) > 1:
+            raise link.Unavailable("cannot reach the runner at /run/persistbot/raven.sock")
+        return real(self, request, wait)
+
+    monkeypatch.setattr(link.Link, "call", call_then_vanish)
+    bot.llm.add(call("write_file", path="a.txt", content="a"), call("run_shell", command="ls"),
+                call("goal_done", summary="never reached"))
+    assert bot.tick(GOAL) == EXIT_TEMPFAIL
+    goal = bot.goal()
+    assert goal["state"] == "active" and goal["failures"] == 0 and goal["deferrals"] == 1
+    (attempt,) = bot.attempts()
+    assert attempt["outcome"] == "deferred" and "tools cannot run" in attempt["detail"]
+    with bot.db() as db:
+        journal = [(row["name"], row["ok"], row["result"]) for row in db.tool_calls(attempt["id"])]
+    assert journal[0][:2] == ("write_file", 1)
+    assert journal[1][0] == "run_shell" and "not run" in journal[1][2]  # not "outcome unknown"
+    assert len(bot.llm.requests) == 2  # the attempt stopped there
+    report = bot.log("report.log")
+    assert "check the runner unit and the tools account" in report and "check the key" not in report
+
+
+def test_the_action_log_says_the_tools_are_not_separated(bot):
+    bot.llm.add(*happy_path())
+    assert bot.tick(GOAL) == EXIT_OK
+    assert "WARNING tools: not separated" in bot.log("action.log")
 
 
 def test_a_deferral_does_not_erase_earlier_failures_and_success_resets_backoff(bot):

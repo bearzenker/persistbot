@@ -24,8 +24,10 @@ def test_every_listed_command_is_allowed(name):
     assert argv(name) == [name]
 
 
-def test_the_list_is_the_design_docs():
-    assert len(allowlist.COMMANDS) == 33
+def test_the_list_is_the_design_docs_plus_the_owners_additions():
+    added = ("cut", "df", "du", "netstat", "wc")  # read-only; seen refused in live runs
+    assert len(allowlist.COMMANDS) == 33 + len(added)
+    assert allowlist.COMMANDS[-len(added):] == added
     assert allowlist.WILDCARDS == ("ls*", "?zip", "?unzip")
 
 

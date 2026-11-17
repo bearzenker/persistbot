@@ -9,7 +9,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from persistbot import EXIT_CONFIG, EXIT_OK, __version__, log, persona, store, tick
+from persistbot import EXIT_CONFIG, EXIT_OK, __version__, link, log, persona, store, tick
 from persistbot.config import BotConfig, ConfigError, load
 
 DEFAULT_CONF = Path("conf") / "init.yaml"
@@ -64,6 +64,7 @@ def status(config: BotConfig) -> int:
         log.out(f"model {model.model}  driver {model.driver}  url {model.url or '(default)'}")
     except persona.PersonaError as exc:
         log.out(f"persona does not resolve: {exc}")
+    _status_tools(config)
     if not config.db_path.exists():
         log.out("no state yet: this bot has not run")
         return EXIT_OK
@@ -92,6 +93,21 @@ def status(config: BotConfig) -> int:
                     f"{outcome}{detail}"
                 )
     return EXIT_OK
+
+
+def _status_tools(config: BotConfig) -> None:
+    """Say whether the tools are separated from the harness, and prove it."""
+    runner = link.Link.for_config(config)
+    if not runner.separated:
+        log.out(f"tools {runner.describe()} (no bot.user in the config)")
+        return
+    try:
+        runner.open()
+        log.out(f"tools {runner.describe()}, checked")
+    except link.RunnerError as exc:
+        log.out(f"tools cannot run: {exc}")
+    finally:
+        runner.close()
 
 
 def main(argv: list[str] | None = None, home: Path | None = None) -> int:

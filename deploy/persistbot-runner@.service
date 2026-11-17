@@ -1,0 +1,36 @@
+# One bot's tool runner: the only process that runs a command or touches a
+# file for the model. Started by persistbot-runner@.socket when the harness
+# connects, it serves that one tick and exits. Never start or enable it by
+# hand.
+#
+# The instance name is the bot's Linux account, and `User=` below is the
+# authority for which account the tools run as. `user:` in the bot's YAML
+# only states what the harness expects; the harness refuses to run tools if
+# the two disagree. Creating the account is the system administrator's job.
+
+[Unit]
+Description=Persist Bot tool runner (%i)
+
+[Service]
+User=%i
+WorkingDirectory=/
+ExecStart=/opt/persistbot/.venv/bin/python -I -m persistbot.runner
+# When the runner exits, systemd stops whatever the tick's commands left
+# running. This is a backstop for a runner that never exits; keep it above
+# TimeoutStartSec in persistbot@.service.
+RuntimeMaxSec=5h
+TimeoutStopSec=10
+# Phase 8 (sudo allowlist) has to lift this, on this unit only.
+NoNewPrivileges=yes
+# Ownership already keeps the account out of the harness's files. These
+# say it again a second way, so one wrong chmod does not open the door.
+# ReadWritePaths= must be the bot's working directory. If the bot's YAML
+# sets `work:` to something other than /opt/bot-<account>, change it here
+# as well, or the runner will find that directory read-only and the harness
+# will refuse to run tools.
+ProtectSystem=strict
+ReadWritePaths=-/opt/bot-%i
+InaccessiblePaths=-/opt/persistbot/conf -/opt/persistbot/%i
+PrivateTmp=yes
+MemoryMax=512M
+TasksMax=128

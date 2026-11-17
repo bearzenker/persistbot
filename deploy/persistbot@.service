@@ -1,18 +1,22 @@
 # One tick of one bot. The instance name is the bot's config file:
 # persistbot@raven runs /opt/persistbot/conf/raven.yaml.
 #
+# This is the harness. It holds the keys and the bot's state, talks to the
+# model, and runs no command itself: the model's commands and file access
+# go to persistbot-runner@raven, which runs as the bot's own account.
+#
 # Install as /etc/systemd/system/persistbot@.service, then enable the timer,
 # not this unit.
 
 [Unit]
 Description=Persist Bot tick (%i)
-After=network-online.target
-Wants=network-online.target
+After=network-online.target persistbot-runner@%i.socket
+Wants=network-online.target persistbot-runner@%i.socket
 
 [Service]
 Type=oneshot
-# An unprivileged account that owns /opt/persistbot. This account is the
-# security boundary; the command allowlist is only a guardrail.
+# An unprivileged account. /opt/persistbot belongs to root; this account
+# owns only the bot's base directory, /opt/persistbot/%i.
 User=persistbot
 Group=persistbot
 WorkingDirectory=/opt/persistbot
@@ -22,9 +26,19 @@ ExecStart=/opt/persistbot/.venv/bin/python /opt/persistbot/bot.py conf/%i.yaml
 # Neither is a fault of this unit. Exit 2 (configuration) still fails it.
 SuccessExitStatus=75 1
 # A backstop only. A tick is bounded by max_turns times the model timeout
-# plus tool time: 12 turns, each a 300 s model call and at most four 60 s
-# commands, is 108 minutes with the defaults. A tick killed here is recorded as a crashed attempt, so
-# keep this above that worst case if you raise either limit.
-TimeoutStartSec=2h
+# plus tool time. With the defaults that is 12 turns, each a 300 s model
+# call and at most four commands the harness waits 80 s for (60 s for the
+# command, 20 s for the runner to answer): 124 minutes. A runner that had
+# to be reached again before every one of those calls would add up to 70 s
+# each, about three hours in all. A tick killed here is recorded as a
+# crashed attempt, which counts as a failure, so keep this above the worst
+# case if you raise a limit.
+TimeoutStartSec=4h
 NoNewPrivileges=yes
-ProtectSystem=full
+# The whole file system is read-only to the harness except the bot's base
+# directory (state, logs, incoming). If your `base` is elsewhere, change
+# this line to match.
+ProtectSystem=strict
+ReadWritePaths=-/opt/persistbot/%i
+ProtectHome=yes
+PrivateTmp=yes

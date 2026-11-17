@@ -18,6 +18,8 @@ something that is only in the doc, ask the owner and write the answer here.
 Update this table in the same pull request that finishes a phase. Status is
 `not started`, `in progress` or `done`. A phase is finished for the purpose
 of starting the next one only when its row says `done` on `origin/main`.
+A row marked `proposed` waits for the owner's decision: do not start it,
+and do not let it hold up the phases after it.
 
 | Phase | Scope | Branch | Status |
 |---|---|---|---|
@@ -26,6 +28,7 @@ of starting the next one only when its row says `done` on `origin/main`.
 | 2 | Driver: persona resolution, OpenAI client, error classes | `claude/awesome-maxwell-8j67y6` | done |
 | 3 | Tools: allowlisted shell, files, memory, notes | `claude/youthful-pasteur-jy7xzm` | done |
 | 4 | Tick loop: goal persistence, recovery, timer units. **MVP, tag `v0.1.0`** | `claude/youthful-pasteur-jy7xzm` | done |
+| 4a | Privilege separation: tools run as a second account (`docs/privilege-separation.md`) | `ccr-7e74e664-33adcf` | done |
 | 5 | Phone a friend | `phase-5-friend` | not started |
 | 6 | Planning mode | `phase-6-plan` | not started |
 | 7 | To Do list | `phase-7-todo` | not started |
@@ -42,18 +45,21 @@ This section is what a new session reads to continue. Rewrite it, do not
 append to it, in every push that changes the state of the work. Sessions can
 end without warning, so it must be true at every pushed commit.
 
-- **State:** phases 0 to 4 are done. Phase 4 (the MVP) is finished on
-  `claude/youthful-pasteur-jy7xzm` and waits for the owner to merge its
-  pull request. No phase is in progress.
-- **Next:** phase 5 (phone a friend), once phase 4 is on `main`. Read
-  "Core model", `docs/persona-pattern.md` and the phase 4 "As built" notes
-  first. The stuck state and the failure counter it escalates from are in
-  `tick._count_failure`.
-- **Waiting on the owner:** merge of phase 4; then one real goal on a VM
-  against the LAN model through the systemd timer, and the tag `v0.1.0`.
-  Build sessions cannot do either. Issues 7 (keys file readable) and 8
-  (`find -exec`) are backlog by the owner's decision; do not fix them
-  unasked.
+- **State:** phases 0 to 4 are done and on `main`. Phase 4a (privilege
+  separation) is finished on `ccr-7e74e664-33adcf` and waits for the owner
+  to merge pull request 13. No phase is in progress.
+- **Next:** phase 5 (phone a friend), once 4a is on `main`. Read "Core
+  model", `docs/persona-pattern.md`, and the "As built" notes of phases 4
+  and 4a first. Friend calls use keys and stay in the harness; nothing in
+  phase 5 goes through the runner. The stuck state and the failure counter
+  it escalates from are in `tick._fail`.
+- **Waiting on the owner:** merge of 4a; then one real goal on a VM against
+  the LAN model through the systemd timer, with the two accounts and the
+  four units, and the tag `v0.1.0`. Build sessions cannot do either: no
+  session has run the units under a real systemd. Issue 8 (`find -exec`)
+  is backlog by the owner's decision; do not fix it unasked. Issue 7 (keys
+  file readable) is closed by 4a on a separated install. Issue 12 (where
+  processed prompt files go) is open and not scheduled.
 - **Dead branch:** `claude/persistbot-mvp-plan-5bdmdy` holds one unmerged
   commit, `a77e334`, that deletes the phase 1 package. The owner decided to
   keep phase 1. Never merge or build on that branch.
@@ -98,7 +104,7 @@ are collected at the end with the default this plan assumes.
 | SDK retries | `max_retries=0`, `timeout=300`. The harness owns retry policy: it defers to the next tick. |
 | Tool budget | At most six tool schemas in any one request, each description one or two lines. Later phases swap tools by mode instead of adding to the list. |
 | Prompt budget | System prompt plus tool schemas under about 1,500 tokens. Memory injected into the prompt is capped by character count. |
-| Shell safety | The allowlist is a guardrail against a confused model, not a sandbox. The security boundary is the unprivileged account. No shell is used: the harness reads the command line itself, and every command in a pipeline must be on the list. |
+| Shell safety | The allowlist is a guardrail against a confused model, not a sandbox. The security boundary is the bot's own unprivileged account, and since phase 4a the harness is outside it, on a second account. No shell is used: the harness reads the command line itself, and every command in a pipeline must be on the list. |
 | Layout | `src/persistbot/` package, `bot.py` launcher at the repo root so `/opt/persistbot/bot.py ./conf/raven.yaml` works as the design doc shows. |
 | Not adopted | Goose and Hermes: their system prompt and tool schemas are too large for a 3B model, and their schedulers are unreliable unattended. LiteLLM: a large dependency for endpoints that already speak the OpenAI protocol. `pydantic-ai-slim` was the fallback had we not wanted to own the loop. Do not reopen these without the owner. |
 
@@ -457,6 +463,15 @@ Pipes and redirection (issue 9, after phase 3):
 - Not done, on purpose: variables, wildcards, `cd`, command sequences.
   Each call still starts in the base directory.
 
+Allowlist additions (owner's standing permission, 2026-11-16):
+
+- `cut`: named by the owner.
+- `df`, `du`, `wc`: refused in the live runs of 2026-11-16.
+- `netstat`: refused in the live run of 2026-11-15.
+- Seen refused and not added, because it runs other commands: `xargs`.
+- Since phase 4a "the base directory" in the notes above means the
+  model's working directory.
+
 ## Phase 4: tick loop (MVP)
 
 Deliverables:
@@ -564,6 +579,151 @@ As built:
   `bot.py`: `free`, `remember`, `write_file`, `read_file`, `goal_done` in
   one attempt, exit 0.
 
+## Phase 4a: privilege separation
+
+Read `docs/privilege-separation.md` first. It holds the evaluation, the
+design and the reasons; this section is the build list.
+
+The fault: the harness and the model's tool calls ran as one account, and
+the harness kept its state in the model's working directory, so a tool
+call could rewrite the allowlist, the bot's YAML, the instance prompt, the
+inbox, the logs and the database, and read the keys.
+
+Deliverables:
+
+- `runner.py`: a standalone process, standard library only, that runs an
+  already-parsed pipeline, reads a file and writes a file. It runs as the
+  bot's Linux account. The pipeline and file code moves there from
+  `tools/shell.py` and `tools/files.py`.
+- `link.py`: the harness's side. One JSON line per request and per reply,
+  a deadline and a size cap on every reply. Two transports: a child
+  process on the harness's own account (development, tests, cloud
+  sessions), and a Unix socket to a systemd socket-activated unit.
+- The allowlist stays in the harness. The runner is sent argv lists.
+- Config keys `user`, `work` and `runner`. The model's working directory
+  is separate from the bot's base directory in every mode.
+- With `user` set: the harness checks the kernel's record of which account
+  the runner's replies come from, and asks the runner whether it can reach
+  the code, config, keys or state. A wrong answer to either means no tool
+  runs. No fallback to the harness account.
+- `deploy/`: the harness unit hardened; `persistbot-runner@.socket` and
+  `persistbot-runner@.service`.
+- `status` reports whether the bot is separated.
+- README install rewritten for two accounts.
+
+Acceptance:
+
+- Every existing tool and tick test passes through the runner.
+- No tool can name the instance prompt, the inbox, the logs or the
+  database: each is a test.
+- Wrong runner account, root, or the harness's own account: exit 2, goal
+  untouched.
+- The runner reports it can write a protected path or read the keys:
+  exit 2, report line.
+- Runner killed during a call: tool error, the next call reconnects.
+- Runner unreachable at the start of a tick: exit 2, goal untouched.
+  Unreachable in the middle of an attempt: `deferred`, failure count
+  unchanged.
+- A reply over the size cap or past the deadline is a tool error.
+
+Done when those pass and the owner has run one goal on the VM with two
+accounts.
+
+As built:
+
+- Two directories per bot. `base` is the harness's (state, lock, logs,
+  incoming, instance prompt). `work` is the model's: `<base>/work` without
+  `user`, and `bot-<user>` beside the install directory with it
+  (`/opt/bot-raven`). With `user` set, `work` may not be, hold or lie
+  inside `base` or the install directory: that is a configuration error.
+  The separation check exempts nothing, so a working directory that
+  reaches into a protected tree some other way (a symbolic link, a
+  directory on Python's path) is refused at the start of the tick. The `PROTECTED` list of file names is gone: the files it
+  guarded are no longer where a tool can name them.
+- `user` must look like a Linux account name. `runner` is the socket path,
+  `/run/persistbot/<user>.sock` unless set, and is an error without `user`.
+- `runner.py` holds the pipeline, read and write code unchanged in
+  behaviour. It is one file with no imports from the package, so it can be
+  copied and run alone. Started by socket activation (`LISTEN_FDS`) it
+  serves one connection and exits; otherwise it serves standard input and
+  output.
+- While a pipeline runs, the runner watches its caller's connection. If
+  the harness goes away, the commands are killed and the runner exits.
+- `link.py`: `Link.for_config(config)`, `open()`, `call(request, wait)`,
+  `close()`. Errors: `Lost` (this call: the runner went away, answered
+  late, answered nonsense, or passed 1 MB; the tool returns an error and
+  the next call reconnects) and `RunnerError` with `Unavailable` and
+  `Refused` (no tool can run).
+- The identity check is not `SO_PEERCRED`. Under socket activation the
+  listening socket was made by systemd, so `SO_PEERCRED` names root. The
+  link sets `SO_PASSCRED` and reads the sender's credentials that the
+  kernel attaches to each piece of data received (`SCM_CREDENTIALS`).
+  Every reply is checked, not only the first. The uid the runner reports
+  in its hello must match as well.
+- The separation check runs in the runner at hello. Not writable: the
+  install directory, the conf directory, the bot's YAML, the base, log and
+  incoming directories, the instance prompt file wherever `system` puts
+  it, and every directory on the harness's `sys.path`,
+  each walked to the bottom, up to 250,000 entries. Not readable or
+  enterable: `keys.json`, the base directory, `state.db`, the log and
+  incoming directories. The first five offenders are named. A symbolic
+  link is judged by where it leads: its target is checked, walked if it
+  is a directory, and reported if the account could create a target that
+  is missing. That includes a listed path that is itself a link, such as
+  an install directory pointing at a versioned one. Running out of entries before the end is a
+  refusal like any other: what was not looked at cannot be vouched for. A
+  real install is about 20,000 entries.
+- "Can write" means the kernel says so or the mode bits say so. The
+  runner unit mounts the file system read-only, which would otherwise
+  hide a mode that has drifted. A directory above a protected path that
+  the account could rename entries in (writable, and not protected by the
+  sticky bit) is reported too.
+- The check is answered by a process on the bot's own account. It can be
+  believed because that process is root-owned code that systemd has just
+  started, before any command of the tick has run, and systemd stopped
+  whatever the previous tick left behind. It is there to catch an install
+  that has drifted, not to out-argue an intruder already on the account.
+- At the start of a tick the link is opened after the prompt files are
+  read and before the attempt row is written. A `RunnerError` there is
+  exit 2, a report line, and a goal left exactly as it was. A
+  `RunnerError` during an attempt ends it `deferred` (one hour, a report
+  line with its own hint), and the journal row says the call was not run.
+- `tools.call` lets `RunnerError` through to the tick. Everything else is
+  still a `Result`. What the runner returns is clipped again in the
+  harness: the runner shares an account with the model's commands and is
+  not trusted to keep its own limits.
+- `status` prints one line about the tools. With `user` set it connects,
+  runs both checks and prints `separated as raven (uid N), working
+  directory ..., checked`, or `tools cannot run:` and the reason. Without
+  `user` it prints `not separated` and starts nothing. Each tick writes
+  the same line to the action log, as a warning when not separated.
+- Units: `persistbot@.service` now wants the runner socket of the same
+  instance name, and is read-only everywhere but `/opt/persistbot/%i`.
+  `persistbot-runner@.socket` (mode 0600, owner `persistbot`) and
+  `persistbot-runner@.service` (`User=%i`) are new. One instance name
+  serves as config file name and account name. The harness waits 20
+  seconds longer for a command than the command is allowed to run, so the
+  worst-case tick grew from 108 to 124 minutes; `TimeoutStartSec` is now
+  4 hours and the runner's `RuntimeMaxSec` 5. All four pass
+  `systemd-analyze verify`. They have not been run under systemd.
+- `conf/init.yaml` leaves `user` commented out, so the shipped file and
+  `conf/cloud.yaml` run on one account. The README tells an installer to
+  set it.
+- Checked by hand, 2026-11-16, in a cloud session: accounts `persistbot`
+  and `raven`, the README layout under `/opt`, and a small stand-in for
+  the socket unit. A scripted model tried the seven attacks that started
+  this phase; each got `Permission denied` or the working-directory rule,
+  and `find -exec id` ran as `raven`. Then, each in turn: a code file made
+  writable, the keys made readable, the base directory made enterable, the
+  runner started as `persistbot` and as root, nothing listening, the
+  working directory missing. Each stopped the tick with the reason, and a
+  queued goal stayed queued.
+- One live goal the same day, persona `Raven` on OpenRouter, separated:
+  the model's commands ran as `raven`. It did not finish in 12 turns
+  (`budget`); that is the model, not the separation.
+- Not built: the `sudo -u` transport, an install script, network limits on
+  the runner unit.
+
 ## Phase 5: phone a friend
 
 First after the MVP because it is the critical success factor.
@@ -627,8 +787,14 @@ says to; the trigger rule is settled at the start of the phase.
 
 - Reporting through the logging function with an rsyslog mode.
 - Sudo allowlist (`sudo wc -l`, `sudo cat`, `sudo grep`, `sudo tail`) with a
-  matching `/etc/sudoers.d/99-bot` template.
+  matching `/etc/sudoers.d/99-bot` template. The rule names the bot's
+  account, never `persistbot`. `persistbot-runner@.service` sets
+  `NoNewPrivileges=yes`, under which sudo cannot work; this phase lifts it
+  on that unit only, and `ProtectSystem=strict` there needs the same look.
 - `<base>/tools/` directory: executables there are approved automatically.
+  It must not be writable by the bot's account, or the model approves its
+  own tools. Since phase 4a `<base>` is closed to that account, so decide
+  here how the runner is to read and run them.
 - Install script, multiple bots per host as separate accounts.
 - Markdown export and import of memory for hand editing.
 
@@ -663,13 +829,17 @@ named.
    allowlist, and a fixed set of redirections. No shell is used. See
    "Pipes and redirection" under phase 3.
 4. **`write_file` scope** (phase 3). Default: writes only under the bot's
-   base directory; reads anywhere the account can read.
+   working directory (the base directory before phase 4a); reads anywhere
+   the bot's account can read.
 5. **SQLite versus the design doc's "existing MCP module"** (phase 1).
    Default: standard `sqlite3`, following Appendix A.
 6. **Failure limit and stuck goals in the MVP** (phase 4). Default: three
    failures, then the goal waits for an operator until phase 5 exists.
 7. **Model eval** (phase 3). Needs a LAN model the build sessions cannot
    reach. Default: the script ships and the operator runs it.
+8. **Privilege separation** (phase 4a). Raised by the owner 2026-11-16:
+   the bot can change its own configuration and code. *Answered
+   2026-11-16:* build it now as phase 4a. See "Owner decisions".
 
 ## Owner decisions
 
@@ -694,3 +864,24 @@ Answers the owner has given. They are settled; do not ask again.
   read `conf/keys.json`) and issue 8 (`find -exec` and similar options run
   commands that are not on the list) are accepted development risk for
   now. They stay open as issues and are not to be fixed unasked.
+- **Privilege separation** (2026-11-16, phase 4a). Approved for build
+  before phase 5:
+  - Mechanism: the runner process behind a systemd socket unit, not
+    `sudo -u`.
+  - Accounts: the harness runs as `persistbot`, the tools as the bot's own
+    account (`raven`). Creating the bot's account is the sysadmin's job,
+    not the harness's or an install script's.
+  - Layout: the application stays in one directory, `/opt/persistbot`,
+    including `conf/` and each bot's base directory
+    (`/opt/persistbot/raven`: queue, logs, state). The bot's account has
+    no access to its base directory. Its writable working directory is
+    `/opt/bot-<account>` (`/opt/bot-raven`).
+  - A bot may not queue work for itself: `incoming/` is closed to it.
+  - The owner accepts that the phase 8 sudo allowlist may not work under
+    the runner unit as shipped (`NoNewPrivileges=yes`). Phase 8 revisits
+    the unit.
+  - Network limits on tool commands: not asked for; unchanged.
+- **Allowlist additions** (2026-11-16). When a build session sees the
+  model fail on a basic, passive Linux command that is not on the list
+  (`cut` was the example), it may add the command without asking. Record
+  each addition under phase 3 "As built".

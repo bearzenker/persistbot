@@ -4,19 +4,16 @@ import time
 
 import pytest
 
-from persistbot import memory, tools
-from persistbot.store import Store
+from persistbot import memory, runner, tools
 from persistbot.tools import files, shell, state
 
 
 @pytest.fixture
-def ctx(tmp_path):
-    base = tmp_path / "raven"
-    base.mkdir()
-    with Store(base / "state.db") as db:
-        goal_id, _ = db.add_goal("fix the thing", "cli")
-        attempt_id = db.start_attempt(goal_id)
-        yield tools.Context(db=db, base=base, goal_id=goal_id, attempt_id=attempt_id, shell_timeout=5)
+def inside(tmp_path):
+    """A runner in this process, for tests that reach into its workings."""
+    here = runner.Runner()
+    assert here.hello({"work": str(tmp_path / "work")})["ok"]
+    return here
 
 
 def run(ctx, name, **args):
@@ -91,14 +88,14 @@ def test_a_handler_that_raises_becomes_a_tool_error(ctx, monkeypatch):
 
 
 def test_run_shell_returns_exit_code_and_output(ctx):
-    (ctx.base / "hello.txt").write_text("hi there\n")
+    (ctx.work / "hello.txt").write_text("hi there\n")
     result = run(ctx, "run_shell", command="cat hello.txt")
     assert result.ok and result.text == "exit code 0\nhi there"
 
 
 def test_run_shell_runs_in_the_base_directory(ctx):
     result = run(ctx, "run_shell", command="pwd")
-    assert result.text.splitlines()[1] == str(ctx.base.resolve())
+    assert result.text.splitlines()[1] == str(ctx.work.resolve())
 
 
 def test_run_shell_nonzero_exit_is_reported_with_stderr(ctx):
@@ -115,7 +112,7 @@ def test_run_shell_no_output(ctx):
 @pytest.mark.parametrize(
     "command",
     ["ls\nrm\x20/tmp/x", "cat hello.txt | python3", "cat $(which ls)", "/bin/ls", "sudo ls",
-     "python3 -V", "ls; ls", "ls && ls", "cat $HOME/x", "ls > ../out.txt", "ls > state.db",
+     "python3 -V", "ls; ls", "ls && ls", "cat $HOME/x", "ls > ../out.txt", "ls > ../state.db",
      "ls 2> err.txt"],
 )
 def test_run_shell_rejections_are_tool_results(ctx, command):
@@ -125,7 +122,7 @@ def test_run_shell_rejections_are_tool_results(ctx, command):
 
 
 def test_run_shell_pipeline(ctx):
-    (ctx.base / "f.txt").write_text("b 2\na 1\nb 3\n")
+    (ctx.work / "f.txt").write_text("b 2\na 1\nb 3\n")
     result = run(ctx, "run_shell", command="cat f.txt | sort | head -2")
     assert result.ok and result.text == "exit code 0\na 1\nb 2"
     result = run(ctx, "run_shell", command="awk '{print $1}' f.txt | sort | uniq -c | sort -rn")
@@ -133,7 +130,7 @@ def test_run_shell_pipeline(ctx):
 
 
 def test_run_shell_pipeline_reports_the_last_exit_code_and_every_error(ctx):
-    (ctx.base / "f.txt").write_text("x\n")
+    (ctx.work / "f.txt").write_text("x\n")
     result = run(ctx, "run_shell", command="cat missing f.txt | grep -c x")
     assert result.ok and "No such file" in result.text and result.text.endswith("1")
     result = run(ctx, "run_shell", command="cat f.txt | grep nothing")
@@ -150,53 +147,54 @@ def test_run_shell_stderr_redirects(ctx):
 
 
 def test_run_shell_writes_and_appends_to_a_file_under_base(ctx):
-    (ctx.base / "f.txt").write_text("one\n")
+    (ctx.work / "f.txt").write_text("one\n")
     assert run(ctx, "run_shell", command="cat f.txt > sub/out.txt").text == "exit code 0\n(no output)"
     assert run(ctx, "run_shell", command="cat f.txt | sort >> sub/out.txt").ok
-    assert (ctx.base / "sub" / "out.txt").read_text() == "one\none\n"
+    assert (ctx.work / "sub" / "out.txt").read_text() == "one\none\n"
     assert run(ctx, "run_shell", command="cat f.txt > sub/out.txt").ok
-    assert (ctx.base / "sub" / "out.txt").read_text() == "one\n"
+    assert (ctx.work / "sub" / "out.txt").read_text() == "one\n"
     assert run(ctx, "run_shell", command="cat f.txt > /dev/null").text == "exit code 0\n(no output)"
 
 
 def test_run_shell_redirect_cannot_leave_base_or_touch_harness_state(ctx, tmp_path):
     victim = tmp_path / "victim.txt"
     victim.write_text("keep me")
-    os.link(victim, ctx.base / "alias")
-    os.link(ctx.base / "state.db", ctx.base / "alias-db")
-    (ctx.base / "link").symlink_to(tmp_path)
-    before = (ctx.base / "state.db").read_bytes()
+    state_db = ctx.work.parent / "state.db"
+    os.link(victim, ctx.work / "alias")
+    os.link(state_db, ctx.work / "alias-db")
+    (ctx.work / "link").symlink_to(tmp_path)
+    before = state_db.read_bytes()
     for target in ("../victim.txt", str(victim), "link/victim.txt", "alias", "alias-db",
-                   "state.db", "bot.lock", "."):
+                   "../state.db", "../bot.lock", str(state_db), "."):
         for operator in (">", ">>"):
             result = run(ctx, "run_shell", command=f"pwd {operator} {target}")
             assert not result.ok and result.text.startswith("error: command not run:"), target
     assert victim.read_text() == "keep me"
-    assert (ctx.base / "state.db").read_bytes() == before
+    assert state_db.read_bytes() == before
 
 
 def test_run_shell_redirect_order_decides_where_errors_go(ctx):
     shown = run(ctx, "run_shell", command="cat missing 2>&1 > out.txt")
-    assert "No such file" in shown.text and (ctx.base / "out.txt").read_text() == ""
+    assert "No such file" in shown.text and (ctx.work / "out.txt").read_text() == ""
     hidden = run(ctx, "run_shell", command="cat missing > out.txt 2>&1")
     assert hidden.text == "exit code 1\n(no output)"
-    assert "No such file" in (ctx.base / "out.txt").read_text()
+    assert "No such file" in (ctx.work / "out.txt").read_text()
 
 
 def test_run_shell_output_to_a_file_is_bounded(ctx):
     started = time.monotonic()
     result = run(ctx, "run_shell", command="cat /dev/zero > dump")
     assert not result.ok and "cut off" in result.text
-    assert (ctx.base / "dump").stat().st_size == shell.FILE_CAP
+    assert (ctx.work / "dump").stat().st_size == shell.FILE_CAP
     result = run(ctx, "run_shell", command="cat /dev/zero | cat >> dump")
-    assert not result.ok and (ctx.base / "dump").stat().st_size == 2 * shell.FILE_CAP
+    assert not result.ok and (ctx.work / "dump").stat().st_size == 2 * shell.FILE_CAP
     assert time.monotonic() - started < 5
     ctx.shell_timeout = 0.3  # /dev/null needs no bound; only the clock stops it
     assert run(ctx, "run_shell", command="cat /dev/zero > /dev/null").text.startswith("stopped: still")
 
 
 def test_run_shell_redirect_to_a_fifo_is_refused_without_blocking(ctx):
-    os.mkfifo(ctx.base / "pipe")
+    os.mkfifo(ctx.work / "pipe")
     started = time.monotonic()
     for operator in (">", ">>"):
         result = run(ctx, "run_shell", command=f"pwd {operator} pipe")
@@ -204,24 +202,29 @@ def test_run_shell_redirect_to_a_fifo_is_refused_without_blocking(ctx):
     assert time.monotonic() - started < 2
 
 
-def test_run_shell_pipeline_with_a_missing_command_runs_nothing(ctx, monkeypatch):
-    (ctx.base / "keep.txt").write_text("x")
+def _request(*commands, stdout=None):
+    return {"op": "run", "commands": [{"argv": list(argv)} for argv in commands],
+            "stdout": stdout, "timeout": 5}
+
+
+def test_pipeline_with_a_missing_command_runs_nothing(inside, monkeypatch):
+    (inside.work / "keep.txt").write_text("x")
     started = []
-    real_popen = shell.subprocess.Popen
+    real_popen = runner.subprocess.Popen
     monkeypatch.setattr(
-        shell.subprocess, "Popen", lambda *a, **k: started.append(a) or real_popen(*a, **k)
+        runner.subprocess, "Popen", lambda *a, **k: started.append(a) or real_popen(*a, **k)
     )
-    result = run(ctx, "run_shell", command="rm keep.txt | ls-no-such-command_persistbot")
-    assert not result.ok and "command not found" in result.text
-    result = run(ctx, "run_shell", command="ls-no-such-command_persistbot | cat > out.txt")
-    assert not result.ok and "command not found" in result.text
-    assert started == [] and (ctx.base / "keep.txt").exists()
-    assert not (ctx.base / "out.txt").exists()
+    reply = inside.handle(_request(["rm", "keep.txt"], ["ls-no-such-command_persistbot"]))
+    assert not reply["ok"] and "command not found" in reply["text"]
+    reply = inside.handle(_request(["ls-no-such-command_persistbot"], ["cat"], stdout="out.txt"))
+    assert not reply["ok"] and "command not found" in reply["text"]
+    assert started == [] and (inside.work / "keep.txt").exists()
+    assert not (inside.work / "out.txt").exists()
 
 
-def test_run_shell_pipeline_that_cannot_be_set_up_leaves_nothing_running(ctx, monkeypatch):
+def test_pipeline_that_cannot_be_set_up_leaves_nothing_running(inside, monkeypatch):
     started = []
-    real_popen, real_pipe = shell.subprocess.Popen, shell._pipe
+    real_popen, real_pipe = runner.subprocess.Popen, runner._pipe
     calls = {"pipe": 0}
 
     def popen(*args, **kwargs):
@@ -235,10 +238,10 @@ def test_run_shell_pipeline_that_cannot_be_set_up_leaves_nothing_running(ctx, mo
             raise OSError(24, "Too many open files")
         return real_pipe()
 
-    monkeypatch.setattr(shell.subprocess, "Popen", popen)
-    monkeypatch.setattr(shell, "_pipe", pipe)
-    result = run(ctx, "run_shell", command="tail -f /dev/null | cat | cat")
-    assert not result.ok and "cannot start the pipeline" in result.text
+    monkeypatch.setattr(runner.subprocess, "Popen", popen)
+    monkeypatch.setattr(runner, "_pipe", pipe)
+    reply = inside.handle(_request(["tail", "-f", "/dev/null"], ["cat"], ["cat"]))
+    assert not reply["ok"] and "cannot start the pipeline" in reply["text"]
     assert len(started) == 1 and started[0].returncode is not None  # killed and reaped
 
 
@@ -253,7 +256,7 @@ def test_run_shell_pipeline_is_capped_and_timed(ctx):
 
 
 def test_run_shell_does_not_use_a_shell(ctx):
-    (ctx.base / "a.txt").write_text("x")
+    (ctx.work / "a.txt").write_text("x")
     result = run(ctx, "run_shell", command="ls *.txt")
     assert not result.ok  # no glob expansion: the literal name does not exist
     result = run(ctx, "run_shell", command="ls ~")
@@ -270,7 +273,7 @@ def test_run_shell_missing_command_is_a_tool_error(ctx):
 
 
 def test_run_shell_output_is_capped_and_the_command_stopped(ctx):
-    (ctx.base / "big.txt").write_text("0123456789\n" * 100_000)
+    (ctx.work / "big.txt").write_text("0123456789\n" * 100_000)
     started = time.monotonic()
     result = run(ctx, "run_shell", command="cat big.txt")
     assert not result.ok and "cut off" in result.text
@@ -297,7 +300,7 @@ def test_run_shell_hides_the_harness_environment(ctx, monkeypatch):
 
 
 def test_read_file_relative_to_base_and_absolute(ctx, tmp_path):
-    (ctx.base / "notes.txt").write_text("inside")
+    (ctx.work / "notes.txt").write_text("inside")
     outside = tmp_path / "outside.txt"
     outside.write_text("outside")
     assert run(ctx, "read_file", path="notes.txt").text == "inside"
@@ -306,7 +309,7 @@ def test_read_file_relative_to_base_and_absolute(ctx, tmp_path):
 
 
 def test_read_file_caps_long_files(ctx):
-    (ctx.base / "long.txt").write_text("x" * (files.READ_CAP * 10))
+    (ctx.work / "long.txt").write_text("x" * (files.READ_CAP * 10))
     result = run(ctx, "read_file", path="long.txt")
     assert result.ok and "cut off after" in result.text
     assert len(result.text) < files.READ_CAP + 100
@@ -319,8 +322,8 @@ def test_read_file_errors_are_tool_results(ctx, path):
 
 
 def test_read_file_refuses_binary_and_reports_empty(ctx):
-    (ctx.base / "blob").write_bytes(b"\x7fELF\x00\x00")
-    (ctx.base / "empty").write_text("")
+    (ctx.work / "blob").write_bytes(b"\x7fELF\x00\x00")
+    (ctx.work / "empty").write_text("")
     assert "not a text file" in run(ctx, "read_file", path="blob").text
     assert run(ctx, "read_file", path="empty").text == "(the file is empty)"
 
@@ -331,8 +334,8 @@ def test_read_file_refuses_binary_and_reports_empty(ctx):
 def test_write_file_under_base_creates_directories(ctx):
     result = run(ctx, "write_file", path="scripts/fix.sh", content="#!/bin/sh\necho ok\n")
     assert result.ok
-    assert (ctx.base / "scripts" / "fix.sh").read_text() == "#!/bin/sh\necho ok\n"
-    absolute = ctx.base / "abs.txt"
+    assert (ctx.work / "scripts" / "fix.sh").read_text() == "#!/bin/sh\necho ok\n"
+    absolute = ctx.work / "abs.txt"
     assert run(ctx, "write_file", path=str(absolute), content="a").ok
     assert absolute.read_text() == "a"
 
@@ -340,8 +343,8 @@ def test_write_file_under_base_creates_directories(ctx):
 def test_write_file_refuses_paths_that_escape_the_base(ctx, tmp_path):
     victim = tmp_path / "victim.txt"
     sibling = tmp_path / "raven-evil" / "x.txt"  # shares the base's name as a prefix
-    (ctx.base / "link").symlink_to(tmp_path)
-    (ctx.base / "filelink").symlink_to(victim)
+    (ctx.work / "link").symlink_to(tmp_path)
+    (ctx.work / "filelink").symlink_to(victim)
     for path in (
         "../victim.txt",
         "sub/../../victim.txt",
@@ -356,37 +359,54 @@ def test_write_file_refuses_paths_that_escape_the_base(ctx, tmp_path):
     assert not victim.exists() and not sibling.exists()
 
 
-@pytest.mark.parametrize("name", ["state.db", "state.db-wal", "bot.lock"])
-def test_write_file_refuses_harness_state(ctx, name):
-    result = run(ctx, "write_file", path=name, content="x")
-    assert not result.ok and "belongs to the harness" in result.text
+@pytest.mark.parametrize(
+    "name", ["state.db", "state.db-wal", "bot.lock", "system.txt", "incoming/self.txt", "logs/report.log"]
+)
+def test_no_tool_can_name_the_harness_files(ctx, name):
+    """The harness's files are beside the working directory, not in it."""
+    base = ctx.work.parent
+    (base / "incoming").mkdir(exist_ok=True)
+    (base / "logs").mkdir(exist_ok=True)
+    (base / "logs" / "report.log").write_text("goal 1 done\n")
+    before = {p: p.read_bytes() for p in base.rglob("*") if p.is_file() and ctx.work not in p.parents}
+    for path in (f"../{name}", str(base / name)):
+        result = run(ctx, "write_file", path=path, content="x")
+        assert not result.ok and "only under" in result.text
+        result = run(ctx, "run_shell", command=f"pwd > {path}")
+        assert not result.ok and "only under" in result.text
+    # The plain name is just a file of the model's own, in its own directory.
+    assert run(ctx, "write_file", path=name, content="mine").ok
+    assert (ctx.work / name).read_text() == "mine"
+    after = {p: p.read_bytes() for p in base.rglob("*") if p.is_file() and ctx.work not in p.parents}
+    assert after == before
 
 
 def test_write_file_refuses_directories_and_oversize(ctx):
-    (ctx.base / "dir").mkdir()
+    (ctx.work / "dir").mkdir()
     assert "is a directory" in run(ctx, "write_file", path="dir", content="x").text
     assert "is a directory" in run(ctx, "write_file", path=".", content="x").text
     big = run(ctx, "write_file", path="big", content="x" * (files.WRITE_CAP + 1))
-    assert not big.ok and not (ctx.base / "big").exists()
+    assert not big.ok and not (ctx.work / "big").exists()
 
 
 def test_write_file_through_a_hard_link_leaves_the_other_name_alone(ctx, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("keep me")
-    os.link(outside, ctx.base / "alias-out")
-    os.link(ctx.base / "state.db", ctx.base / "alias-db")
-    before = (ctx.base / "state.db").read_bytes()
+    os.link(outside, ctx.work / "alias-out")
+    state_db = ctx.work.parent / "state.db"
+    os.link(state_db, ctx.work / "alias-db")
+    before = state_db.read_bytes()
     assert run(ctx, "write_file", path="alias-out", content="new").ok
     assert run(ctx, "write_file", path="alias-db", content="new").ok
     assert outside.read_text() == "keep me"
-    assert (ctx.base / "state.db").read_bytes() == before
-    assert (ctx.base / "alias-out").read_text() == "new"
+    assert state_db.read_bytes() == before
+    assert (ctx.work / "alias-out").read_text() == "new"
     assert ctx.db.goal(ctx.goal_id) is not None  # the database still works
-    assert not list(ctx.base.glob(".write-*"))
+    assert not list(ctx.work.glob(".write-*"))
 
 
 def test_write_file_keeps_the_mode_of_a_file_it_replaces(ctx):
-    script = ctx.base / "fix.sh"
+    script = ctx.work / "fix.sh"
     script.write_text("old")
     script.chmod(0o750)
     assert run(ctx, "write_file", path="fix.sh", content="new").ok
@@ -394,7 +414,7 @@ def test_write_file_keeps_the_mode_of_a_file_it_replaces(ctx):
     assert run(ctx, "write_file", path="plain.txt", content="x").ok
     umask = os.umask(0)
     os.umask(umask)
-    assert (ctx.base / "plain.txt").stat().st_mode & 0o777 == 0o666 & ~umask
+    assert (ctx.work / "plain.txt").stat().st_mode & 0o777 == 0o666 & ~umask
 
 
 # remember, note, goal_done ----------------------------------------------
@@ -437,7 +457,7 @@ def test_goal_done_without_a_summary_does_not_finish(ctx):
 
 
 def test_only_goal_done_sets_done(ctx):
-    (ctx.base / "f").write_text("x")
+    (ctx.work / "f").write_text("x")
     calls = [
         ("run_shell", {"command": "ls"}),
         ("read_file", {"path": "f"}),

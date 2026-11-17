@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from persistbot import EXIT_CONFIG, EXIT_FAILED, EXIT_OK, EXIT_TEMPFAIL, driver, log, memory, store, tools
+from persistbot import link as runlink
 from persistbot.config import BotConfig, ConfigError
 from persistbot.lock import TickLock
 from persistbot.persona import ResolvedModel
@@ -41,7 +42,8 @@ class Outcome:
     kind: str                       # one of store.OUTCOMES
     detail: str = ""
     retry_after: float | None = None
-    fatal: bool = False             # an upstream error an operator has to fix
+    fatal: bool = False             # an error an operator has to fix
+    hint: str = "check the key, model and provider"
 
 
 def _clip(text: str, limit: int = CLIP) -> str:
@@ -189,14 +191,14 @@ def _user_prompt(db: store.Store, goal: sqlite3.Row, attempt_id: int) -> str:
 
 
 def _attempt(config: BotConfig, model: ResolvedModel, db: store.Store,
-             goal: sqlite3.Row, attempt_id: int) -> Outcome:
+             goal: sqlite3.Row, attempt_id: int, link: runlink.Link) -> Outcome:
     messages = [
         {"role": "system", "content": _system_prompt(config, model, db)},
         {"role": "user", "content": _user_prompt(db, goal, attempt_id)},
     ]
     for message in messages:
         log.chat(message["role"], message["content"])
-    ctx = tools.Context(db=db, base=config.base, goal_id=goal["id"], attempt_id=attempt_id)
+    ctx = tools.Context(db=db, link=link, goal_id=goal["id"], attempt_id=attempt_id)
     schemas = tools.schemas()
     invalid = 0
 
@@ -237,7 +239,17 @@ def _attempt(config: BotConfig, model: ResolvedModel, db: store.Store,
             # dies between them leaves the first, and the next attempt is
             # told the outcome is unknown.
             journal = db.begin_tool_call(attempt_id, call.name, call.arguments)
-            result = tools.call(ctx, call.name, call.arguments)
+            try:
+                result = tools.call(ctx, call.name, call.arguments)
+            except runlink.RunnerError as exc:
+                # The runner cannot be reached, or is no longer the account it
+                # must be. Nothing ran. An operator has to act, so the goal
+                # waits as it does for a bad key: not a failure of the model.
+                text = f"error: not run: the command runner is unavailable: {exc}"
+                db.finish_tool_call(journal, False, text)
+                log.chat("tool", {"name": call.name, "ok": False, "result": text})
+                return Outcome(store.DEFERRED, f"tools cannot run: {exc}", fatal=True,
+                               hint="check the runner unit and the tools account")
             db.finish_tool_call(journal, result.ok, result.text)
             messages.append({"role": "tool", "tool_call_id": call.id, "content": result.text})
             log.chat("tool", {"name": call.name, "ok": result.ok, "result": result.text})
@@ -275,7 +287,7 @@ def _record(config: BotConfig, db: store.Store, goal: sqlite3.Row, attempt_id: i
                          deferrals=deferrals, not_before=db.clock() + wait)
         line = f"goal {goal_id} deferred for {wait:.0f}s: {_clip(outcome.detail, 300)}"
         if outcome.fatal:
-            log.report(line + " (will not fix itself: check the key, model and provider)")
+            log.report(line + f" (will not fix itself: {outcome.hint})")
         else:
             log.action(line, "warning")
         return EXIT_TEMPFAIL
@@ -309,16 +321,27 @@ def run(config: BotConfig, model: ResolvedModel | None, prompts: list[tuple[str,
                 else:
                     log.action("tick: nothing to do")
                 return EXIT_OK
-            # Read the prompt files before anything is recorded, so a missing
-            # system.txt costs the goal nothing.
+            # Read the prompt files and reach the runner before anything is
+            # recorded, so a missing system.txt or a runner that is not the
+            # account it must be costs the goal nothing.
             _system_prompt(config, model, db)
-            if goal["state"] == store.QUEUED:
-                db.update_goal(goal["id"], state=store.ACTIVE)
-            attempt_id = db.start_attempt(goal["id"])
-            log.action(f"goal {goal['id']} attempt {attempt_id} started")
-            outcome = _attempt(config, model, db, goal, attempt_id)
-            code = _record(config, db, db.goal(goal["id"]), attempt_id, outcome)
-            log.action(f"goal {goal['id']} attempt {attempt_id}: {outcome.kind}")
-            return code
+            link = runlink.Link.for_config(config)
+            try:
+                try:
+                    link.open()
+                except runlink.RunnerError as exc:
+                    log.report(f"tools cannot run, so goal {goal['id']} was not attempted: {exc}")
+                    raise ConfigError(f"tools cannot run: {exc}") from exc
+                log.action(f"tools: {link.describe()}", "info" if link.separated else "warning")
+                if goal["state"] == store.QUEUED:
+                    db.update_goal(goal["id"], state=store.ACTIVE)
+                attempt_id = db.start_attempt(goal["id"])
+                log.action(f"goal {goal['id']} attempt {attempt_id} started")
+                outcome = _attempt(config, model, db, goal, attempt_id, link)
+                code = _record(config, db, db.goal(goal["id"]), attempt_id, outcome)
+                log.action(f"goal {goal['id']} attempt {attempt_id}: {outcome.kind}")
+                return code
+            finally:
+                link.close()
     finally:
         lock.release()
