@@ -168,7 +168,15 @@ class Link:
             return
         if reply.get("writable"):
             work = str(reply.get("work") or self.work)
-            if any(path == work or path.startswith(work + "/") for path in map(str, reply["writable"])):
+            for entry in map(str, reply["writable"]):
+                place, _, through = entry.partition(" (through ")
+                if place != work and not place.startswith(work + "/"):
+                    continue
+                if through:
+                    raise Refused(
+                        f"the harness's files lead into the tools account's working "
+                        f"directory: {through.rstrip(')')} points at {place}"
+                    )
                 raise Refused(
                     f"bot.work ({work}) lies inside the harness's own files; the tools account "
                     "must have a working directory outside the install, configuration and state"

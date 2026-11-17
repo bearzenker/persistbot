@@ -116,37 +116,80 @@ def _replaceable(path: str) -> str | None:
         child = parent
 
 
+def _creatable(path: str) -> str | None:
+    """For a path that does not exist: the place where this account could
+    bring it into being, if there is one."""
+    probe = path
+    while not os.path.lexists(probe):
+        parent = os.path.dirname(probe)
+        if parent == probe:
+            return None
+        probe = parent
+    return probe if _allowed(probe, 2) else _replaceable(probe)
+
+
 def _reachable_for_write(tops: list[str]) -> tuple[list[str], int, bool]:
     """Paths under `tops` this account can write: (found, looked at, finished).
 
     Nothing is exempt, the working directory least of all: one that lies
     inside a protected tree is exactly what this is here to report.
+
+    A symbolic link is judged by where it leads, because that is what the
+    harness would load: the target is checked, and walked if it is a
+    directory. That holds for a listed path that is itself a link, such as
+    an install directory pointing at a versioned one.
     """
     found: list[str] = []
     seen = 0
+    queue: list[tuple[str, str | None]] = []   # (real path, the link it was reached through)
+    covered: set[str] = set()                   # real paths queued or walked
 
-    def check(path: str) -> bool:
-        """True when the search should stop."""
-        nonlocal seen
-        seen += 1
-        # A link is judged by what it points at only if that is listed too.
-        if not os.path.islink(path) and _allowed(path, 2):
-            found.append(path)
+    def add(path: str, via: str | None) -> None:
+        real = os.path.realpath(path)
+        if real in covered or any(real.startswith(top + os.sep) for top in covered):
+            return  # inside something already looked at, or about to be
+        covered.add(real)
+        queue.append((real, via))
+
+    def note(path: str, via: str | None) -> None:
+        text = path if via is None else f"{path} (through {via})"
+        if text not in found:
+            found.append(text)
+
+    def full() -> bool:
         return len(found) >= CHECK_REPORT or seen >= CHECK_BUDGET
 
     for top in tops:
-        above = _replaceable(top)
-        if above is not None and above not in found:
-            found.append(above)
-        if check(top):
-            return found, seen, len(found) >= CHECK_REPORT
-        if not os.path.isdir(top) or os.path.islink(top):
+        add(top, top if os.path.realpath(top) != os.path.abspath(top) else None)
+
+    while queue and not full():
+        real, via = queue.pop(0)
+        seen += 1
+        if not os.path.lexists(real):
+            hit = _creatable(real)       # a link to nothing: could the target be supplied?
+        elif _allowed(real, 2):
+            hit = real
+        else:
+            hit = _replaceable(real)
+        if hit is not None:
+            note(hit, via)
+        if not os.path.isdir(real):
             continue
-        for root, dirs, names in os.walk(top):
+        for root, dirs, names in os.walk(real):
             for name in dirs + names:
-                if check(os.path.join(root, name)):
-                    return found, seen, len(found) >= CHECK_REPORT
-    return found, seen, True
+                path = os.path.join(root, name)
+                seen += 1
+                if os.path.islink(path):
+                    add(path, path)
+                elif _allowed(path, 2):
+                    note(path, via)
+                if full():
+                    break
+            if full():
+                break
+            # A directory listed in its own right is walked from the queue.
+            dirs[:] = [name for name in dirs if os.path.join(root, name) not in covered]
+    return found, seen, len(found) >= CHECK_REPORT or (not queue and seen < CHECK_BUDGET)
 
 
 def _reachable_for_read(paths: list[str]) -> list[str]:

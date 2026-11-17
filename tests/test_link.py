@@ -360,10 +360,88 @@ def test_the_check_says_when_it_ran_out_of_budget(tmp_path, monkeypatch):
     install = tmp_path / "install"
     install.mkdir()
     for number in range(20):
-        (install / f"f{number}").symlink_to("/nonexistent")  # links are looked at, never reported
+        (install / f"f{number}").write_text("x")
+    stranger(monkeypatch)
     monkeypatch.setattr(runner, "CHECK_BUDGET", 10)
-    reply = runner.Runner().hello({"work": str(tmp_path / "work"), "deny_write": [str(install)]})
-    assert reply["checked"] == 10 and not reply["complete"]
+    found, seen, complete = runner._reachable_for_write([str(install)])
+    assert found == [] and seen == 10 and not complete
+    monkeypatch.setattr(runner, "CHECK_BUDGET", 1000)
+    found, seen, complete = runner._reachable_for_write([str(install)])
+    assert found == [] and seen == 21 and complete
+
+
+def stranger(monkeypatch):
+    """Judge access as an account that owns nothing here and is in no group,
+    by mode bits alone, whoever runs the suite."""
+    monkeypatch.setattr(runner.os, "access", lambda path, mode: False)
+    monkeypatch.setattr(runner.os, "getuid", lambda: 54321)
+    monkeypatch.setattr(runner.os, "getgid", lambda: 54321)
+    monkeypatch.setattr(runner.os, "getgroups", lambda: [])
+
+
+@pytest.fixture
+def install(tmp_path, monkeypatch):
+    """A closed install tree, and beside it a directory the stranger can write."""
+    tree = tmp_path / "install"
+    (tree / "src").mkdir(parents=True)
+    (tree / "src" / "a.py").write_text("x")
+    (tmp_path / "open").mkdir()
+    (tmp_path / "open").chmod(0o777)
+    stranger(monkeypatch)
+    assert runner._reachable_for_write([str(tree)]) == ([], 3, True)
+    return tree
+
+
+def test_a_link_to_a_writable_file_is_reported(install, tmp_path):
+    (tmp_path / "open" / "evil.py").write_text("x")
+    (tmp_path / "open" / "evil.py").chmod(0o666)
+    (install / "src" / "helper.py").symlink_to(tmp_path / "open" / "evil.py")
+    found, _, complete = runner._reachable_for_write([str(install)])
+    assert found == [f"{tmp_path}/open/evil.py (through {install}/src/helper.py)"] and complete
+
+
+def test_a_link_to_a_file_in_a_writable_directory_is_reported(install, tmp_path):
+    (tmp_path / "open" / "calm.py").write_text("x")  # 0644: not writable, but its directory is
+    (install / "src" / "helper.py").symlink_to(tmp_path / "open" / "calm.py")
+    found, _, _ = runner._reachable_for_write([str(install)])
+    assert found == [f"{tmp_path}/open (through {install}/src/helper.py)"]
+
+
+def test_a_link_to_nothing_is_reported_if_the_target_could_be_supplied(install, tmp_path):
+    (install / "src" / "later.py").symlink_to(tmp_path / "open" / "not" / "yet.py")
+    found, _, _ = runner._reachable_for_write([str(install)])
+    assert found == [f"{tmp_path}/open (through {install}/src/later.py)"]
+    (install / "src" / "later.py").unlink()
+    (install / "src" / "never.py").symlink_to(install / "missing.py")  # nobody can supply this one
+    assert runner._reachable_for_write([str(install)])[0] == []
+
+
+def test_a_linked_directory_is_walked(install, tmp_path):
+    vendor = tmp_path / "vendor"
+    (vendor / "pkg").mkdir(parents=True)
+    (vendor / "pkg" / "mod.py").write_text("x")
+    (install / "src" / "vendor").symlink_to(vendor)
+    assert runner._reachable_for_write([str(install)])[0] == []
+    (vendor / "pkg" / "mod.py").chmod(0o666)
+    found, _, _ = runner._reachable_for_write([str(install)])
+    assert found == [f"{vendor}/pkg/mod.py (through {install}/src/vendor)"]
+
+
+def test_an_install_directory_that_is_itself_a_link_is_walked(install, tmp_path):
+    current = tmp_path / "current"
+    current.symlink_to(install)  # /opt/persistbot -> /opt/persistbot-0.1.0
+    assert runner._reachable_for_write([str(current)]) == ([], 3, True)
+    (install / "src" / "a.py").chmod(0o666)
+    found, _, _ = runner._reachable_for_write([str(current)])
+    assert found == [f"{install}/src/a.py (through {current})"]
+
+
+def test_links_inside_the_tree_and_loops_cost_nothing(install):
+    (install / "lib64").symlink_to(install / "src")   # as a venv has
+    (install / "src" / "self").symlink_to(".")
+    (install / "src" / "up").symlink_to("..")
+    found, seen, complete = runner._reachable_for_write([str(install)])
+    assert found == [] and complete and seen < 20
 
 
 def test_mode_bits_count_even_where_the_kernel_says_no(tmp_path, monkeypatch):
@@ -461,6 +539,16 @@ def test_a_runner_on_another_account_cannot_touch_the_harness(as_raven):
         finally:
             one.close()
             served.stop()
+
+        # A link in the install that leads into the bot's own directory.
+        (install / "helper.py").symlink_to(work / "new.py")
+        served = Activated(top, uid=bot_uid, program=program)
+        try:
+            with pytest.raises(Refused, match="lead into the tools account's working directory: .*helper.py points at .*new.py"):
+                Link(work=work, user="raven", socket_path=served.path, **deny).open()
+        finally:
+            served.stop()
+            (install / "helper.py").unlink()
 
         # One file loosened: the next tick refuses to run any tool at all.
         os.chmod(install / "allowlist.py", 0o666)

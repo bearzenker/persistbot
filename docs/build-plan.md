@@ -665,8 +665,11 @@ As built:
   incoming directories, and every directory on the harness's `sys.path`,
   each walked to the bottom, up to 250,000 entries. Not readable or
   enterable: `keys.json`, the base directory, `state.db`, the log and
-  incoming directories. The first five offenders are named. Symbolic
-  links are not followed. Running out of entries before the end is a
+  incoming directories. The first five offenders are named. A symbolic
+  link is judged by where it leads: its target is checked, walked if it
+  is a directory, and reported if the account could create a target that
+  is missing. That includes a listed path that is itself a link, such as
+  an install directory pointing at a versioned one. Running out of entries before the end is a
   refusal like any other: what was not looked at cannot be vouched for. A
   real install is about 20,000 entries.
 - "Can write" means the kernel says so or the mode bits say so. The
