@@ -150,6 +150,12 @@ def test_work_and_runner_can_be_set(make_conf, tmp_path):
         ("user: ''", "non-empty"),
         ("user: raven\nwork: raven/work", "inside bot.base"),
         ("user: raven\nwork: raven", "inside bot.base"),
+        ("user: raven\nwork: src/scratch", "inside the install directory"),
+        ("user: raven\nwork: .", "contains bot.base"),       # the install directory itself
+        ("user: raven\nwork: ..", "contains bot.base"),
+        ("user: raven\nwork: /", "contains bot.base"),
+        ("user: raven\nbase: /var/lib/pb/raven\nwork: .", "inside the install directory"),
+        ("user: raven\nbase: /var/lib/pb/raven\nwork: ..", "contains the install directory"),
     ],
 )
 def test_rejects_bad_separation_settings(make_conf, body, message):

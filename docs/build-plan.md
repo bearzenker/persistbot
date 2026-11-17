@@ -634,8 +634,11 @@ As built:
 - Two directories per bot. `base` is the harness's (state, lock, logs,
   incoming, instance prompt). `work` is the model's: `<base>/work` without
   `user`, and `bot-<user>` beside the install directory with it
-  (`/opt/bot-raven`). `work` inside `base` is a configuration error when
-  `user` is set. The `PROTECTED` list of file names is gone: the files it
+  (`/opt/bot-raven`). With `user` set, `work` may not be, hold or lie
+  inside `base` or the install directory: that is a configuration error.
+  The separation check exempts nothing, so a working directory that
+  reaches into a protected tree some other way (a symbolic link, a
+  directory on Python's path) is refused at the start of the tick. The `PROTECTED` list of file names is gone: the files it
   guarded are no longer where a tool can name them.
 - `user` must look like a Linux account name. `runner` is the socket path,
   `/run/persistbot/<user>.sock` unless set, and is an error without `user`.

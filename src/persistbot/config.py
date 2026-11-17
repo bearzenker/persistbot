@@ -195,10 +195,21 @@ def load(path: str | Path) -> BotConfig:
         work = venv.parent / f"bot-{user}"
     else:
         work = base / "work"
-    if user is not None and (work == base or base in work.parents):
-        raise ConfigError(
-            f"bot.work ({work}) is inside bot.base ({base}), which the tools account must not reach"
-        )
+    if user is not None:
+        # The tools account owns `work`. It may not be, hold or lie inside
+        # anything of the harness's. The runner checks this again against
+        # the real file system at every tick; this catches the plain cases.
+        for what, mine in (("bot.base", base), ("the install directory", venv)):
+            if work == mine or mine in work.parents:
+                raise ConfigError(
+                    f"bot.work ({work}) is inside {what} ({mine}), "
+                    "which the tools account must not reach"
+                )
+            if work in mine.parents:
+                raise ConfigError(
+                    f"bot.work ({work}) contains {what} ({mine}), "
+                    "which the tools account must not reach"
+                )
     runner = None
     if user is not None:
         runner = (

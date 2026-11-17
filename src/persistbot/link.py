@@ -167,6 +167,12 @@ class Link:
         if not self.separated:
             return
         if reply.get("writable"):
+            work = str(reply.get("work") or self.work)
+            if any(path == work or path.startswith(work + "/") for path in map(str, reply["writable"])):
+                raise Refused(
+                    f"bot.work ({work}) lies inside the harness's own files; the tools account "
+                    "must have a working directory outside the install, configuration and state"
+                )
             raise Refused(
                 f"the tools account '{self.user}' can write {_names(reply['writable'])}; "
                 "it must not be able to change the harness's code, configuration or state"

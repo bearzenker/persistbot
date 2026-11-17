@@ -116,8 +116,12 @@ def _replaceable(path: str) -> str | None:
         child = parent
 
 
-def _reachable_for_write(tops: list[str], skip: Path | None) -> tuple[list[str], int, bool]:
-    """Paths under `tops` this account can write: (found, looked at, finished)."""
+def _reachable_for_write(tops: list[str]) -> tuple[list[str], int, bool]:
+    """Paths under `tops` this account can write: (found, looked at, finished).
+
+    Nothing is exempt, the working directory least of all: one that lies
+    inside a protected tree is exactly what this is here to report.
+    """
     found: list[str] = []
     seen = 0
 
@@ -131,8 +135,6 @@ def _reachable_for_write(tops: list[str], skip: Path | None) -> tuple[list[str],
         return len(found) >= CHECK_REPORT or seen >= CHECK_BUDGET
 
     for top in tops:
-        if skip is not None and Path(top) == skip:
-            continue
         above = _replaceable(top)
         if above is not None and above not in found:
             found.append(above)
@@ -141,8 +143,6 @@ def _reachable_for_write(tops: list[str], skip: Path | None) -> tuple[list[str],
         if not os.path.isdir(top) or os.path.islink(top):
             continue
         for root, dirs, names in os.walk(top):
-            if skip is not None:
-                dirs[:] = [name for name in dirs if Path(root, name) != skip]
             for name in dirs + names:
                 if check(os.path.join(root, name)):
                     return found, seen, len(found) >= CHECK_REPORT
@@ -202,7 +202,7 @@ class Runner:
         self.work = work.resolve()
         os.chdir(self.work)
         writable, seen, complete = _reachable_for_write(
-            [str(p) for p in request.get("deny_write") or []], self.work)
+            [str(p) for p in request.get("deny_write") or []])
         return {
             "ok": True,
             "protocol": PROTOCOL,

@@ -305,18 +305,16 @@ def test_a_runner_that_can_reach_protected_paths_is_refused(tmp_path, activated,
         one.open()
 
 
-def test_the_check_looks_inside_directories_but_not_into_the_work_directory(tmp_path):
+def test_the_check_looks_inside_directories(tmp_path):
     install = tmp_path / "install"
     (install / "src").mkdir(parents=True)
     (install / "src" / "a.py").write_text("x")
-    work = install / "work"
     here = runner.Runner()
-    reply = here.hello({"work": str(work), "deny_write": [str(install)], "deny_read": [str(install / "src" / "a.py")]})
+    reply = here.hello({"work": str(tmp_path / "work"), "deny_write": [str(install)],
+                        "deny_read": [str(install / "src" / "a.py")]})
     assert reply["ok"] and reply["complete"] and reply["uid"] == ME
-    # Whatever this account can write, the work directory is never reported.
-    assert not any(str(work) in path for path in reply["writable"])
-    if ME != 0:  # root can write anything, so only then is the rest meaningful
-        assert str(install) in reply["writable"]
+    assert str(install) in reply["writable"] and str(install / "src" / "a.py") in reply["writable"]
+    if ME != 0:  # root can write anything, so only then can a closed tree be shown to pass
         os.chmod(install / "src" / "a.py", 0o444)
         os.chmod(install / "src", 0o555)
         os.chmod(install, 0o555)
@@ -326,6 +324,36 @@ def test_the_check_looks_inside_directories_but_not_into_the_work_directory(tmp_
         finally:
             os.chmod(install, 0o755)
             os.chmod(install / "src", 0o755)
+
+
+@pytest.mark.parametrize("where", ["install/src/scratch", "linked"])
+def test_a_work_directory_inside_a_protected_tree_is_refused(tmp_path, activated, as_raven, where):
+    """The tools account must own its work directory, so one inside the
+    harness's files would be a writable hole in them. A symbolic link that
+    leads there is the same hole."""
+    as_raven(ME)
+    code = tmp_path / "install" / "src"
+    code.mkdir(parents=True)
+    os.chmod(tmp_path / "install", 0o555)  # closed, as an install is: only the work directory is open
+    os.chmod(code, 0o555)
+    try:
+        if where == "linked":
+            os.chmod(code, 0o755)
+            (code / "scratch").mkdir()
+            os.chmod(code, 0o555)
+            (tmp_path / "linked").symlink_to(code / "scratch")
+        else:
+            os.chmod(code, 0o755)
+            (code / "scratch").mkdir()
+            os.chmod(code, 0o555)
+        one = Link(work=tmp_path / where, user="raven", socket_path=activated().path,
+                   deny_write=[str(tmp_path / "install")])
+        with pytest.raises(Refused, match="bot.work .*scratch\\) lies inside the harness's own files"):
+            one.open()
+        assert one._sock is None
+    finally:
+        os.chmod(tmp_path / "install", 0o755)
+        os.chmod(code, 0o755)
 
 
 def test_the_check_says_when_it_ran_out_of_budget(tmp_path, monkeypatch):
