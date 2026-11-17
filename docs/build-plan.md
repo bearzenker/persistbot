@@ -660,11 +660,12 @@ As built:
 - The separation check runs in the runner at hello. Not writable: the
   install directory, the conf directory, the bot's YAML, the base, log and
   incoming directories, and every directory on the harness's `sys.path`,
-  each walked to the bottom, up to 100,000 entries. Not readable or
+  each walked to the bottom, up to 250,000 entries. Not readable or
   enterable: `keys.json`, the base directory, `state.db`, the log and
   incoming directories. The first five offenders are named. Symbolic
-  links are not followed. Running out of entries is a warning in the
-  action log, not a refusal.
+  links are not followed. Running out of entries before the end is a
+  refusal like any other: what was not looked at cannot be vouched for. A
+  real install is about 20,000 entries.
 - "Can write" means the kernel says so or the mode bits say so. The
   runner unit mounts the file system read-only, which would otherwise
   hide a mode that has drifted. A directory above a protected path that
@@ -693,7 +694,10 @@ As built:
   instance name, and is read-only everywhere but `/opt/persistbot/%i`.
   `persistbot-runner@.socket` (mode 0600, owner `persistbot`) and
   `persistbot-runner@.service` (`User=%i`) are new. One instance name
-  serves as config file name and account name. All four pass
+  serves as config file name and account name. The harness waits 20
+  seconds longer for a command than the command is allowed to run, so the
+  worst-case tick grew from 108 to 124 minutes; `TimeoutStartSec` is now
+  4 hours and the runner's `RuntimeMaxSec` 5. All four pass
   `systemd-analyze verify`. They have not been run under systemd.
 - `conf/init.yaml` leaves `user` commented out, so the shipped file and
   `conf/cloud.yaml` run on one account. The README tells an installer to

@@ -236,6 +236,30 @@ def test_a_runner_that_lies_about_its_account_is_refused(tmp_path, as_raven):
             served.stop()
 
 
+@pytest.mark.parametrize("complete", ["False", "None", "'yes'"])
+def test_a_separation_check_that_did_not_finish_is_refused(tmp_path, as_raven, complete):
+    """Nothing found, but not everything looked at: that is not a pass."""
+    partial = tmp_path / "partial.py"
+    partial.write_text(
+        "import json, os, socket\n"
+        "conn, _ = socket.socket(fileno=3).accept()\n"
+        "conn.recv(65536)\n"
+        "reply = {'ok': True, 'uid': os.getuid(), 'writable': [], 'readable': [], 'checked': 250000}\n"
+        f"if {complete} is not None: reply['complete'] = {complete}\n"
+        "conn.sendall(json.dumps(reply).encode() + b'\\n')\n"
+        "conn.recv(65536)\n"
+    )
+    as_raven(ME)
+    served = Activated(tmp_path, program=partial)
+    one = separated(tmp_path, served.path)
+    try:
+        with pytest.raises(Refused, match="stopped after 250000 files"):
+            one.open()
+        assert one._sock is None
+    finally:
+        served.stop()
+
+
 @pytest.mark.parametrize("uid, problem", [(None, "no Linux account"), (0, "root"), ("self", "harness itself")])
 def test_the_account_must_exist_and_be_neither_root_nor_the_harness(monkeypatch, uid, problem):
     class Entry:

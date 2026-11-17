@@ -16,8 +16,9 @@ User=%i
 WorkingDirectory=/
 ExecStart=/opt/persistbot/.venv/bin/python -I -m persistbot.runner
 # When the runner exits, systemd stops whatever the tick's commands left
-# running. This is a backstop for a runner that never exits.
-RuntimeMaxSec=3h
+# running. This is a backstop for a runner that never exits; keep it above
+# TimeoutStartSec in persistbot@.service.
+RuntimeMaxSec=5h
 TimeoutStopSec=10
 # Phase 8 (sudo allowlist) has to lift this, on this unit only.
 NoNewPrivileges=yes

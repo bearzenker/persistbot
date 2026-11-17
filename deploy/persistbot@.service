@@ -26,10 +26,14 @@ ExecStart=/opt/persistbot/.venv/bin/python /opt/persistbot/bot.py conf/%i.yaml
 # Neither is a fault of this unit. Exit 2 (configuration) still fails it.
 SuccessExitStatus=75 1
 # A backstop only. A tick is bounded by max_turns times the model timeout
-# plus tool time: 12 turns, each a 300 s model call and at most four 60 s
-# commands, is 108 minutes with the defaults. A tick killed here is recorded as a crashed attempt, so
-# keep this above that worst case if you raise either limit.
-TimeoutStartSec=2h
+# plus tool time. With the defaults that is 12 turns, each a 300 s model
+# call and at most four commands the harness waits 80 s for (60 s for the
+# command, 20 s for the runner to answer): 124 minutes. A runner that had
+# to be reached again before every one of those calls would add up to 70 s
+# each, about three hours in all. A tick killed here is recorded as a
+# crashed attempt, which counts as a failure, so keep this above the worst
+# case if you raise a limit.
+TimeoutStartSec=4h
 NoNewPrivileges=yes
 # The whole file system is read-only to the harness except the bot's base
 # directory (state, logs, incoming). If your `base` is elsewhere, change

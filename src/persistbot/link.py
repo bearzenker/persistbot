@@ -176,10 +176,13 @@ class Link:
                 f"the tools account '{self.user}' can read {_names(reply['readable'])}; "
                 "the keys, queue, logs and state must be closed to it"
             )
-        if not reply.get("complete"):
-            log.action(
-                f"separation check stopped after {reply.get('checked')} files; "
-                "the install directory is larger than it covers", "warning",
+        if reply.get("complete") is not True:
+            # What was not looked at cannot be vouched for.
+            raise Refused(
+                f"the separation check stopped after {reply.get('checked')} files without "
+                "reaching the end of the harness's install and Python directories, so it "
+                f"cannot say that '{self.user}' is kept out of them; move what does not "
+                "belong there out of the install directory"
             )
 
     # calling -------------------------------------------------------------

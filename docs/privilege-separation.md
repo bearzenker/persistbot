@@ -113,9 +113,11 @@ journal, limits    ◄── result ───────    timeouts, output ca
   runner, since they share an account.
 - A runner that goes away during a call makes that call a tool error
   ("outcome unknown"), and the next call reconnects. A runner that cannot
-  be reached at all is an operator problem: the attempt ends `deferred`
-  with a report line, like a bad key. It never counts toward the failure
-  limit.
+  be reached at all is an operator problem, and never counts toward the
+  failure limit. At the start of a tick, before the attempt is recorded,
+  it is exit 2 with a report line and the goal untouched. In the middle of
+  an attempt, the attempt ends `deferred` with a report line, like a bad
+  key.
 - The runner imports nothing but the standard library and is started with
   `python -I`.
 

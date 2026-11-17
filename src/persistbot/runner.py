@@ -44,7 +44,7 @@ FILE_CAP = 1_000_000     # bytes one command may write through `> file`
 READ_CAP = 8000          # characters of a file returned to the model
 WRITE_CAP = 100_000      # characters accepted in one write
 MAX_LINE = 4_000_000     # bytes in one request line
-CHECK_BUDGET = 100_000   # files and directories looked at by the separation check
+CHECK_BUDGET = 250_000   # files and directories the separation check will look at
 CHECK_REPORT = 5         # reachable paths named in the reply
 ACCEPT_WAIT = 30.0       # seconds a socket-activated runner waits for its caller
 # Commands see only these, so nothing the runner was started with leaks
