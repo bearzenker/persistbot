@@ -15,6 +15,16 @@ def _close_logs():
     log.close()
 
 
+@pytest.fixture
+def as_raven(monkeypatch):
+    """Make `user: raven` mean an account of our choosing."""
+
+    def choose(uid):
+        monkeypatch.setattr("persistbot.link._account", lambda user: uid)
+
+    return choose
+
+
 PERSONAS = {
     "Bichon": {"model": "edge-3b", "provider": "Bichon", "parameters": {"timeout": 5}},
     "Antelope": {

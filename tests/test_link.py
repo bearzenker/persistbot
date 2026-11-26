@@ -1,12 +1,12 @@
 """The link to the runner: transports, the account check, the separation
-check, and what happens when the runner misbehaves or goes away."""
+check, and what happens when the runner misbehaves or goes away.
+
+Any account can run these. The check against a runner on a real second
+account needs root and lives in test_link_root.py."""
 
 import json
 import os
-import shutil
 import socket
-import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -14,40 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from activation import Activated
 from persistbot import link, runner, tools
 from persistbot.link import Link, Lost, Refused, Unavailable
 
 ME = os.getuid()
-
-# Becomes the runner the way systemd socket activation starts it: the
-# listening socket on descriptor 3, LISTEN_FDS and LISTEN_PID set.
-ACTIVATE = (
-    "import os, sys; os.dup2(int(sys.argv[1]), 3); "
-    "os.environ.update(LISTEN_FDS='1', LISTEN_PID=str(os.getpid())); "
-    "os.execv(sys.executable, [sys.executable, '-I', sys.argv[2]])"
-)
-
-
-class Activated:
-    """A runner behind a Unix socket, optionally on another account (root only)."""
-
-    def __init__(self, directory, uid=None, program=runner.__file__):
-        self.path = Path(directory) / "runner.sock"
-        self.path.unlink(missing_ok=True)
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(str(self.path))
-        listener.listen(4)
-        account = {} if uid is None else {"user": uid, "group": uid, "extra_groups": []}
-        self.proc = subprocess.Popen(
-            [sys.executable, "-c", ACTIVATE, str(listener.fileno()), str(program)],
-            pass_fds=(listener.fileno(),), cwd="/", **account,
-        )
-        listener.close()
-
-    def stop(self):
-        if self.proc.poll() is None:
-            self.proc.kill()
-        self.proc.wait()
 
 
 @pytest.fixture
@@ -61,16 +32,6 @@ def activated(tmp_path):
     yield start
     for one in started:
         one.stop()
-
-
-@pytest.fixture
-def as_raven(monkeypatch):
-    """Make `user: raven` mean an account of our choosing."""
-
-    def choose(uid):
-        monkeypatch.setattr(link, "_account", lambda user: uid)
-
-    return choose
 
 
 def separated(tmp_path, path, **kwargs):
@@ -320,7 +281,9 @@ def test_the_check_looks_inside_directories(tmp_path):
         os.chmod(install, 0o555)
         try:
             reply = runner.Runner().hello({"work": str(tmp_path / "w2"), "deny_write": [str(install)]})
-            assert reply["writable"] == []
+            # The parent is writable, so the tree could be swapped out from
+            # above and is reported as that parent; nothing inside it is.
+            assert reply["writable"] == [str(tmp_path)]
         finally:
             os.chmod(install, 0o755)
             os.chmod(install / "src", 0o755)
@@ -515,91 +478,3 @@ def test_a_work_directory_that_cannot_be_written_says_what_to_check(tmp_path):
     (tmp_path / "file").write_text("in the way")
     reply = runner.Runner().hello({"work": str(tmp_path / "file" / "work")})
     assert not reply["ok"] and "ReadWritePaths= in persistbot-runner@.service" in reply["text"]
-
-
-# the real thing, when the suite runs as root --------------------------------
-
-
-@pytest.mark.skipif(ME != 0, reason="needs root to start a runner on another account")
-def test_a_runner_on_another_account_cannot_touch_the_harness(as_raven):
-    bot_uid = 54321
-    top = Path(tempfile.mkdtemp(dir="/tmp", prefix="persistbot-sep-"))
-    try:
-        os.chmod(top, 0o755)
-        install, state, work = top / "install", top / "state", top / "work"
-        install.mkdir()
-        state.mkdir(mode=0o700)
-        work.mkdir()
-        os.chown(work, bot_uid, bot_uid)
-        (install / "allowlist.py").write_text("ORIGINAL")
-        (install / "keys.json").write_text('{"key": "sk-secret"}')
-        os.chmod(install / "keys.json", 0o600)
-        (state / "state.db").write_text("goals")
-        program = shutil.copy(runner.__file__, top / "runner.py")  # standalone: it needs nothing else
-        deny = {"deny_write": [str(install), str(state)], "deny_read": [str(install / "keys.json"), str(state)]}
-        as_raven(bot_uid)
-
-        served = Activated(top, uid=bot_uid, program=program)
-        one = Link(work=work, user="raven", socket_path=served.path, **deny)
-        try:
-            one.open()
-            assert one.uid == bot_uid
-
-            def run(*argv):
-                return one.call({"op": "run", "commands": [{"argv": list(argv)}], "timeout": 5}, 10)
-
-            assert one.call({"op": "write", "path": "new.py", "content": "PWNED"}, 5)["ok"]
-            assert "Permission denied" in run("cp", "new.py", str(install / "allowlist.py"))["text"]
-            assert "Permission denied" in run("cat", str(install / "keys.json"))["text"]
-            assert "Permission denied" in run("ls", str(state))["text"]
-            assert "Permission denied" in run("rm", str(state / "state.db"))["text"]
-            assert not one.call({"op": "read", "path": str(install / "keys.json")}, 5)["ok"]
-            assert f"uid={bot_uid}" in run("find", ".", "-maxdepth", "0", "-exec", "id", ";")["text"]
-            assert (install / "allowlist.py").read_text() == "ORIGINAL"
-            assert (state / "state.db").read_text() == "goals"
-            assert (work / "new.py").stat().st_uid == bot_uid
-        finally:
-            one.close()
-            served.stop()
-
-        # A link in the install that leads into the bot's own directory.
-        (install / "helper.py").symlink_to(work / "new.py")
-        served = Activated(top, uid=bot_uid, program=program)
-        try:
-            with pytest.raises(Refused, match="lead into the tools account's working directory: .*helper.py points at .*new.py"):
-                Link(work=work, user="raven", socket_path=served.path, **deny).open()
-        finally:
-            served.stop()
-            (install / "helper.py").unlink()
-
-        # One file loosened: the next tick refuses to run any tool at all.
-        os.chmod(install / "allowlist.py", 0o666)
-        served = Activated(top, uid=bot_uid, program=program)
-        try:
-            with pytest.raises(Refused, match="can write .*allowlist.py"):
-                Link(work=work, user="raven", socket_path=served.path, **deny).open()
-        finally:
-            served.stop()
-
-        # A file whose mode has drifted is reported even where it cannot be
-        # written at this moment, and so is a directory above the install
-        # that the account could rename things in.
-        os.chmod(install / "allowlist.py", 0o644)
-        os.chmod(top, 0o777)
-        served = Activated(top, uid=bot_uid, program=program)
-        try:
-            with pytest.raises(Refused, match=f"can write {top}[,;]"):
-                Link(work=work, user="raven", socket_path=served.path, **deny).open()
-        finally:
-            served.stop()
-            os.chmod(top, 0o755)
-
-        # The runner started as the wrong account (here: root itself).
-        served = Activated(top, program=program)
-        try:
-            with pytest.raises(Refused, match="came from uid 0, not from 'raven'"):
-                Link(work=work, user="raven", socket_path=served.path, **deny).open()
-        finally:
-            served.stop()
-    finally:
-        shutil.rmtree(top, ignore_errors=True)
