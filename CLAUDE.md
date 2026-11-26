@@ -125,9 +125,9 @@ python bot.py conf/cloud.yaml status
 - If the variables are absent, skip all of this. Every phase can be built
   and tested without them.
 - `conf/cloud.yaml` has no `user`, so a cloud run is not separated: tools
-  run on the session's own account. One test in `tests/test_link.py` uses
-  real separate accounts and runs only when the suite runs as root, which
-  a cloud session does. A full two-account install can be made under
+  run on the session's own account. `tests/test_link_root.py` uses real
+  separate accounts and runs only when the suite runs as root, which a
+  cloud session does. A full two-account install can be made under
   `/opt` in a session by following the README; systemd is not running
   there, so something else has to listen on the runner's socket.
 
